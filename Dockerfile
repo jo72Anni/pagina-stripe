@@ -1,14 +1,17 @@
 # Usa un'immagine base con PHP e Apache
 FROM php:7.4-apache
 
-# Installa le dipendenze di sistema necessarie
+# Aggiorna e installa le dipendenze di sistema necessarie
 RUN apt-get update && apt-get install -y \
     libpng-dev libjpeg-dev libfreetype6-dev \
     zip \
     git \
     unzip \
     libssl-dev \
-    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && apt-get clean
+
+# Configura ed installa l'estensione GD e OpenSSL
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install gd openssl
 
 # Copia i file del tuo progetto nel container
@@ -21,7 +24,7 @@ WORKDIR /var/www/html
 RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
 # Esegui composer install per installare le dipendenze PHP
-RUN composer install
+RUN composer install --no-interaction
 
 # Esponi la porta 4242 per il traffico Stripe
 EXPOSE 4242
