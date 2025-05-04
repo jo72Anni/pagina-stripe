@@ -1,6 +1,9 @@
 <?php
 require_once 'vendor/autoload.php';
 
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception;
+
 // Controlla se il file .env esiste prima di caricarlo
 if (file_exists(__DIR__ . '/.env')) {
     $dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
@@ -8,16 +11,6 @@ if (file_exists(__DIR__ . '/.env')) {
 }
 
 \Stripe\Stripe::setApiKey($_ENV['STRIPE_SECRET_KEY']);
-
-// Directory per salvare gli ordini
-$ordersDir = __DIR__ . '/ordini';
-if (!file_exists($ordersDir)) {
-    if (!mkdir($ordersDir, 0755, true)) {
-        error_log('Impossibile creare la directory degli ordini: ' . $ordersDir);
-        http_response_code(500);
-        exit('Errore interno del server: Impossibile creare la directory degli ordini.');
-    }
-}
 
 // Funzione per generare HTML
 function generateOrderHtml($data) {
@@ -128,6 +121,38 @@ function generateOrderHtml($data) {
     ";
 }
 
+function sendOrderEmail(array $orderData, string $recipientEmail) {
+    $mail = new PHPMailer(true);
+
+    try {
+        // Configurazione per l'API di Brevo
+        $apiKey = $_ENV['BREVO_API_KEY'];
+        $mail->isSMTP();
+        $mail->Host = 'smtp-relay.brevo.com'; // Host SMTP di Brevo
+        $mail->SMTPAuth = true;
+        $mail->Username = 'SMTP'; // Username SMTP di Brevo
+        $mail->Password = $apiKey; // La chiave API come password SMTP
+        $mail->SMTPSecure = PHPMailer::ENCRYPTION_TLS;
+        $mail->Port = 587;
+
+        // Impostazioni email
+        $mail->setFrom('test@stripe.com', 'Il Nome del Tuo Negozio'); // Sostituisci con il tuo indirizzo
+        $mail->addAddress($recipientEmail);
+        $mail->Subject = "Nuovo Ordine Ricevuto #{$orderData['order_id']}";
+        $mail->isHTML(true);
+        $mail->Body = generateOrderHtml($orderData);
+        $mail->AltBody = strip_tags(generateOrderHtml($orderData));
+
+        $mail->send();
+        error_log("Email dell'ordine #{$orderData['order_id']} inviata con successo a {$recipientEmail}");
+        return true;
+
+    } catch (Exception $e) {
+        error_log("Errore nell'invio dell'email dell'ordine #{$orderData['order_id']} a {$recipientEmail}: {$mail->ErrorInfo}");
+        return false;
+    }
+}
+
 try {
     $payload = @file_get_contents('php://input');
     $sig_header = $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '';
@@ -185,7 +210,7 @@ try {
             $subtotal += $item->amount_total / 100;
         }
 
-        // Preparazione dati per HTML
+        // Preparazione dati per l'email
         $orderData = [
             'order_id' => $session->metadata->order_id ?? $session->id,
             'user_id' => $session->metadata->user_id ?? $session->client_reference_id,
@@ -202,23 +227,17 @@ try {
             'products' => $products
         ];
 
-        // Generazione e salvataggio HTML
-        $htmlContent = generateOrderHtml($orderData);
-        $filename = "{$ordersDir}/order_{$orderData['order_id']}.html";
-        if (file_put_contents($filename, $htmlContent) === false) {
-            error_log('Impossibile scrivere il file HTML dell\'ordine: ' . $filename);
+        // Invia l'email
+        $recipientEmail = 'perdifumo72@libero.it';
+        if (sendOrderEmail($orderData, $recipientEmail)) {
+            http_response_code(200);
+            echo 'Webhook processed successfully and email sent';
+        } else {
             http_response_code(500);
-            exit('Errore interno del server: Impossibile salvare l\'ordine (HTML).');
+            error_log('Webhook processed successfully, but failed to send email');
+            echo 'Webhook processed successfully, but failed to send email';
         }
 
-        // Salvataggio dati grezzi come backup
-        $jsonFilename = "{$ordersDir}/order_{$orderData['order_id']}.json";
-        if (file_put_contents($jsonFilename, json_encode($orderData, JSON_PRETTY_PRINT)) === false) {
-            error_log('Impossibile scrivere il file JSON dell\'ordine: ' . $jsonFilename);
-        }
-
-        http_response_code(200);
-        echo 'Webhook processed successfully';
     } else {
         http_response_code(200); // Accetta altri eventi senza errori, ma non fare nulla
         echo 'Evento webhook non gestito: ' . $event->type;
