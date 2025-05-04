@@ -1,4 +1,3 @@
-
 <?php
 // Abilita tutti gli errori
 error_reporting(E_ALL);
@@ -24,13 +23,13 @@ function debugBrevo() {
     $output = "=== DEBUG BREVO ===\n";
     
     // 1. Verifica variabili d'ambiente
-    $requiredVars = ['BREVO_API_KEY', 'SENDER_EMAIL', 'TEST_EMAIL'];
+    $requiredVars = ['BREVO_API_KEY', 'SENDER_EMAIL', 'TEST_EMAIL', 'BREVO_SMTP_PASSWORD'];
     foreach ($requiredVars as $var) {
         $value = getenv($var);
         $output .= "$var: ".(empty($value) ? 'MISSING' : substr($value, 0, 3).'...')."\n";
     }
 
-    // 2. Test connessione Brevo
+    // 2. Test connessione API Brevo
     try {
         require __DIR__ . '/vendor/autoload.php';
         $config = Brevo\Client\Configuration::getDefaultConfiguration()
@@ -38,10 +37,47 @@ function debugBrevo() {
         
         $api = new Brevo\Client\Api\AccountApi(new GuzzleHttp\Client(), $config);
         $account = $api->getAccount();
-        $output .= "Connessione OK! Piano: ".$account->getPlan()[0]->getType()."\n";
+        $output .= "API OK! Piano: ".$account->getPlan()[0]->getType()."\n";
         
     } catch (Exception $e) {
-        $output .= "ERRORE: ".$e->getMessage()."\n";
+        $output .= "ERRORE API: ".$e->getMessage()."\n";
+    }
+    
+    // 3. Test connessione SMTP (nuova sezione integrata)
+    $output .= "\n=== TEST SMTP ===\n";
+    $smtpHost = 'smtp-relay.brevo.com';
+    $smtpPort = 587;
+    $timeout = 5;
+    
+    $socket = @fsockopen($smtpHost, $smtpPort, $errno, $errstr, $timeout);
+    
+    if ($socket) {
+        $output .= "✅ Connessione SMTP riuscita (porta $smtpPort)\n";
+        fclose($socket);
+        
+        // Test avanzato con PHPMailer se le credenziali sono presenti
+        if (getenv('BREVO_SMTP_PASSWORD')) {
+            try {
+                $mail = new PHPMailer(true);
+                $mail->SMTPDebug = 1; // Livello base di debug
+                $mail->isSMTP();
+                $mail->Host = $smtpHost;
+                $mail->Port = $smtpPort;
+                $mail->SMTPAuth = false; // Solo test connessione
+                $mail->Timeout = $timeout;
+                
+                if ($mail->smtpConnect()) {
+                    $output .= "✔ Handshake SMTP completato\n";
+                }
+            } catch (Exception $e) {
+                $output .= "⚠ Errore PHPMailer: ".$e->getMessage()."\n";
+            }
+        }
+    } else {
+        $output .= "❌ Connessione SMTP fallita: $errstr ($errno)\n";
+        $output .= "Prova alternative:\n";
+        $output .= "- Porta 465 con SSL\n";
+        $output .= "- Usa l'API Brevo\n";
     }
     
     return nl2br($output);
@@ -65,74 +101,26 @@ function debugBrevo() {
             border: 1px solid #ddd;
             white-space: pre-wrap;
         }
+        .success { color: green; }
+        .error { color: red; }
+        .warning { color: orange; }
     </style>
 </head>
 <body>
 
-    <h1><?= htmlspecialchars($product['name']) ?></h1>
-    <img src="<?= htmlspecialchars($product['image']) ?>" alt="Prodotto">
-    <p>Prezzo: €<?= number_format($product['price'] / 100, 2) ?></p>
+    <!-- ... (resto del tuo HTML esistente) ... -->
 
-    <form id="purchase-form">
-        <input type="hidden" name="product_id" value="<?= htmlspecialchars($product['id']) ?>">
-        <input type="hidden" name="product_name" value="<?= htmlspecialchars($product['name']) ?>">
-        <input type="hidden" name="price" value="<?= htmlspecialchars($product['price']) ?>">
-        <input type="hidden" name="sku" value="<?= htmlspecialchars($product['sku']) ?>">
-
-        <label for="quantity">Quantità:</label>
-        <input type="number" name="quantity" value="1" min="1" required>
-
-        <label for="name">Nome:</label>
-        <input type="text" name="customer_name" required>
-
-        <label for="email">Email:</label>
-        <input type="email" name="email" required>
-
-        <button type="submit">Acquista Ora</button>
-    </form>
-
-    <!-- Sezione Debug -->
+    <!-- Sezione Debug migliorata -->
     <div class="debug">
         <h3>Stato Sistema</h3>
         <?= debugBrevo() ?>
         <p>Stripe Key: <?= isset($_ENV['STRIPE_PUBLIC_KEY']) ? substr($_ENV['STRIPE_PUBLIC_KEY'], 0, 6).'...' : 'MISSING' ?></p>
+        
+        <?php if (!getenv('BREVO_SMTP_PASSWORD')): ?>
+            <p class="warning">Attenzione: BREVO_SMTP_PASSWORD non configurata</p>
+        <?php endif; ?>
     </div>
 
-    <script>
-        const stripe = Stripe('<?= $_ENV['STRIPE_PUBLIC_KEY'] ?? '' ?>');
-
-        document.getElementById('purchase-form').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            
-            // Mostra loader
-            const btn = this.querySelector('button');
-            btn.disabled = true;
-            btn.textContent = 'Elaborazione...';
-
-            try {
-                const formData = new FormData(this);
-                const response = await fetch('/crea_sessione.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(Object.fromEntries(formData.entries()))
-                });
-
-                const result = await response.json();
-                
-                if (result.sessionId) {
-                    stripe.redirectToCheckout({ sessionId: result.sessionId });
-                } else {
-                    alert(result.error || 'Errore durante il pagamento');
-                    btn.disabled = false;
-                    btn.textContent = 'Acquista Ora';
-                }
-            } catch (error) {
-                console.error(error);
-                alert('Errore di connessione');
-                btn.disabled = false;
-                btn.textContent = 'Acquista Ora';
-            }
-        });
-    </script>
+    <!-- ... (resto del tuo JavaScript) ... -->
 </body>
 </html>
