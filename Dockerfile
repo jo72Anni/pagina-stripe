@@ -1,37 +1,33 @@
-# Usa un'immagine base con PHP e Apache
+# Immagine base con PHP, Apache, e Composer
 FROM php:7.4-apache
 
-# Installa le dipendenze di sistema necessarie
+# Installa solo ciò che serve
 RUN apt-get update && apt-get install -y \
-    libpng-dev libjpeg-dev libfreetype6-dev \
-    zip \
-    git \
-    unzip \
-    libssl-dev \
+    unzip zip git libzip-dev libonig-dev libssl-dev \
+    && docker-php-ext-install zip \
     && apt-get clean
 
-# Configura ed installa le estensioni PHP necessarie (GD e OpenSSL)
-RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install gd \
-    && docker-php-ext-install openssl
+# Abilita mod_rewrite (utile per Laravel, Symfony ecc.)
+RUN a2enmod rewrite
 
-# Copia i file del tuo progetto nel container
-COPY . /var/www/html/
+# Installa Composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+# Copia i file del progetto
+COPY . /var/www/html
 
 # Imposta la directory di lavoro
 WORKDIR /var/www/html
 
-# Installa Composer
-RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+# Installa le dipendenze PHP
+RUN composer install --no-interaction --no-dev --optimize-autoloader
 
-# Esegui composer install per installare le dipendenze PHP
-RUN composer install --no-interaction
+# Espone la porta 80
+EXPOSE 80
 
-# Esponi la porta 4242 per il traffico Stripe
-EXPOSE 4242
-
-# Avvia Apache in primo piano per mantenere il container attivo
+# Comando per avviare Apache
 CMD ["apache2-foreground"]
+
 
 
 
