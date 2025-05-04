@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     git \
     unzip \
     libssl-dev \
+    libxrender1 libfontconfig1 \
     && apt-get clean
 
 # Configura ed installa l'estensione GD e OpenSSL
@@ -31,6 +32,7 @@ EXPOSE 4242
 
 # Avvia Apache in primo piano per mantenere il container attivo
 CMD ["apache2-foreground"]
+
 
 
 
