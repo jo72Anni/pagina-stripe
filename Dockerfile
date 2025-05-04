@@ -1,19 +1,19 @@
 # Usa un'immagine base con PHP e Apache
 FROM php:7.4-apache
 
-# Aggiorna e installa le dipendenze di sistema necessarie
+# Installa le dipendenze di sistema necessarie
 RUN apt-get update && apt-get install -y \
     libpng-dev libjpeg-dev libfreetype6-dev \
     zip \
     git \
     unzip \
     libssl-dev \
-    libxrender1 libfontconfig1 \
     && apt-get clean
 
-# Configura ed installa l'estensione GD e OpenSSL
+# Configura ed installa le estensioni PHP necessarie (GD e OpenSSL)
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install gd openssl
+    && docker-php-ext-install gd \
+    && docker-php-ext-install openssl
 
 # Copia i file del tuo progetto nel container
 COPY . /var/www/html/
