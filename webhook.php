@@ -1,46 +1,48 @@
 <?php
 require __DIR__ . '/vendor/autoload.php';
 
-// 1. Recupera le variabili d'ambiente da Render.com
-$senderEmail = getenv('SENDER_EMAIL'); // o $_ENV['SENDER_EMAIL']
-$brevoApiKey = getenv('BREVO_API_KEY');
-$testEmail = getenv('TEST_EMAIL');
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception;
 
-// 2. Configura Brevo
-$config = Brevo\Client\Configuration::getDefaultConfiguration()
-    ->setApiKey('api-key', $brevoApiKey);
+// 1. Configurazione
+$senderEmail = getenv('SENDER_EMAIL'); // dolcissimogianni@gmail.com
+$testEmail = getenv('TEST_EMAIL'); // perdifumo72@libero.it
+$smtpPassword = getenv('BREVO_SMTP_PASSWORD'); // xsmtp-... (creala in Brevo)
 
-$apiInstance = new Brevo\Client\Api\TransactionalEmailsApi(
-    new GuzzleHttp\Client(),
-    $config
-);
+// 2. Istanza PHPMailer
+$mail = new PHPMailer(true); // 'true' abilita le eccezioni
 
-// 3. Crea e invia l'email
-$email = new Brevo\Client\Model\SendSmtpEmail([
-    'sender' => new Brevo\Client\Model\SendSmtpEmailSender([
-        'email' => $senderEmail,
-        'name' => 'Gianni'
-    ]),
-    'to' => [
-        new Brevo\Client\Model\SendSmtpEmailTo([
-            'email' => $testEmail,
-            'name' => 'Test Render'
-        ])
-    ],
-    'subject' => 'Conferma funzionamento da Render',
-    'htmlContent' => '<h1>Test riuscito! 🎉</h1><p>Questa email prova che Render e Brevo sono configurati correttamente.</p>'
-]);
-
-// 4. Debug dell'invio
 try {
-    $result = $apiInstance->sendTransacEmail($email);
-    echo "Email inviata a: " . $testEmail . "<br>";
-    echo "ID Brevo: " . $result->getMessageId();
+    // Impostazioni SMTP Brevo
+    $mail->isSMTP();
+    $mail->Host = 'smtp-relay.brevo.com';
+    $mail->Port = 587; // Porta TLS
+    $mail->SMTPAuth = true;
+    $mail->Username = $senderEmail; // Deve essere verificato in Brevo
+    $mail->Password = $smtpPassword; // Password SMTP (NON l'API key)
+    $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+
+    // Destinatari
+    $mail->setFrom($senderEmail, 'Gianni');
+    $mail->addAddress($testEmail, 'Destinatario Test');
+    
+    // Contenuto
+    $mail->Subject = 'Test SMTP da Render.com ✅';
+    $mail->Body = '<h1>Funziona!</h1><p>Questa email prova che lo SMTP Brevo è configurato correttamente.</p>';
+    $mail->isHTML(true);
+
+    // 3. Invio e debug
+    $mail->send();
+    echo "Email inviata con successo a: " . $testEmail;
+
 } catch (Exception $e) {
-    echo "Errore Brevo: " . $e->getMessage() . "<br><br>";
-    echo "Variabili usate:<br>";
-    echo "SENDER_EMAIL: " . $senderEmail . "<br>";
-    echo "TEST_EMAIL: " . $testEmail . "<br>";
-    echo "BREVO_API_KEY: " . substr($brevoApiKey, 0, 5) . "..."; // Non mostrare tutta la chiave!
+    echo "<strong>Errore nell'invio:</strong><br>";
+    echo $e->getMessage() . "<br><br>";
+    
+    echo "<strong>Controlla:</strong><br>";
+    echo "1. La password SMTP (<code>xsmtp-...</code>) è corretta?<br>";
+    echo "2. Il mittente (<code>$senderEmail</code>) è verificato in <a href='https://app.brevo.com/settings/senders' target='_blank'>Brevo > Senders</a>?<br>";
+    echo "3. Render.com permette connessioni in uscita sulla porta 587?<br>";
+    echo "4. Hai abilitato l'opzione <strong>SMTP</strong> in <a href='https://app.brevo.com/settings/keys/api' target='_blank'>Brevo > API Keys</a>?";
 }
 ?>
