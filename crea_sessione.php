@@ -1,8 +1,11 @@
 <?php
 require 'vendor/autoload.php';
 
-$dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
-$dotenv->load();
+// Controlla se il file .env esiste prima di caricarlo
+if (file_exists(__DIR__ . '/.env')) {
+    $dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
+    $dotenv->load();
+}
 
 \Stripe\Stripe::setApiKey($_ENV['STRIPE_SECRET_KEY']);
 
