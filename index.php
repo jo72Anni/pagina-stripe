@@ -23,7 +23,7 @@ function debugBrevo() {
     $output = "=== DEBUG BREVO ===\n";
     
     // 1. Verifica variabili d'ambiente
-    $requiredVars = ['BREVO_API_KEY', 'SENDER_EMAIL', 'TEST_EMAIL', 'BREVO_SMTP_PASSWORD'];
+    $requiredVars = ['BREVO_API_KEY', 'SENDER_EMAIL', 'TEST_EMAIL'];
     foreach ($requiredVars as $var) {
         $value = getenv($var);
         $output .= "$var: ".(empty($value) ? 'MISSING' : substr($value, 0, 3).'...')."\n";
@@ -43,27 +43,28 @@ function debugBrevo() {
         $output .= "ERRORE API: ".$e->getMessage()."\n";
     }
     
-    // 3. Test connessione SMTP (nuova sezione integrata)
+    // 3. Test SMTP (sempre visibile)
     $output .= "\n=== TEST SMTP ===\n";
     $smtpHost = 'smtp-relay.brevo.com';
     $smtpPort = 587;
     $timeout = 5;
     
+    // Test connessione base
     $socket = @fsockopen($smtpHost, $smtpPort, $errno, $errstr, $timeout);
     
     if ($socket) {
-        $output .= "✅ Connessione SMTP riuscita (porta $smtpPort)\n";
+        $output .= "✅ Connessione TCP alla porta $smtpPort riuscita\n";
         fclose($socket);
         
-        // Test avanzato con PHPMailer se le credenziali sono presenti
+        // Test PHPMailer solo se le credenziali esistono
         if (getenv('BREVO_SMTP_PASSWORD')) {
             try {
                 $mail = new PHPMailer(true);
-                $mail->SMTPDebug = 1; // Livello base di debug
+                $mail->SMTPDebug = 1;
                 $mail->isSMTP();
                 $mail->Host = $smtpHost;
                 $mail->Port = $smtpPort;
-                $mail->SMTPAuth = false; // Solo test connessione
+                $mail->SMTPAuth = false;
                 $mail->Timeout = $timeout;
                 
                 if ($mail->smtpConnect()) {
@@ -72,6 +73,8 @@ function debugBrevo() {
             } catch (Exception $e) {
                 $output .= "⚠ Errore PHPMailer: ".$e->getMessage()."\n";
             }
+        } else {
+            $output .= "ℹ Password SMTP non configurata (BREVO_SMTP_PASSWORD)\n";
         }
     } else {
         $output .= "❌ Connessione SMTP fallita: $errstr ($errno)\n";
