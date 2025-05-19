@@ -1,13 +1,9 @@
 
 
 <?php
-// Imposta il file di log (puoi personalizzare il path)
-$logFile = __DIR__ . '/webhook_debug.log';
-
-// Funzione helper per scrivere nel log
+// Funzione helper per scrivere nel log di sistema
 function logMessage($msg) {
-    global $logFile;
-    error_log(date('[Y-m-d H:i:s] ') . $msg . PHP_EOL, 3, $logFile);
+    error_log(date('[Y-m-d H:i:s] ') . $msg);
 }
 
 logMessage("=== Webhook invoked ===");
