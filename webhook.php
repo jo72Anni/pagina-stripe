@@ -1,83 +1,67 @@
 
 
 <?php
+// Imposta il file di log (puoi personalizzare il path)
+$logFile = __DIR__ . '/webhook_debug.log';
 
-require __DIR__ . '/../vendor/autoload.php'; // Se il file è in public/
-
-// Prendi la DATABASE_URL da env
-$databaseUrl = getenv('DATABASE_URL');
-
-if (!$databaseUrl) {
-    file_put_contents('php://stderr', "❌ DATABASE_URL non impostata\n");
-    http_response_code(500);
-    exit();
+// Funzione helper per scrivere nel log
+function logMessage($msg) {
+    global $logFile;
+    error_log(date('[Y-m-d H:i:s] ') . $msg . PHP_EOL, 3, $logFile);
 }
 
-// Parse DATABASE_URL (es: postgres://user:pass@host:port/dbname)
-$dbopts = parse_url($databaseUrl);
+logMessage("=== Webhook invoked ===");
 
-$host = $dbopts["host"];
-$port = $dbopts["port"];
-$user = $dbopts["user"];
-$pass = $dbopts["pass"];
-$dbname = ltrim($dbopts["path"], '/');
-
-$dsn = "pgsql:host=$host;port=$port;dbname=$dbname";
-
-try {
-    $pdo = new PDO($dsn, $user, $pass, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
-    ]);
-} catch (PDOException $e) {
-    file_put_contents('php://stderr', "❌ Connessione DB fallita: " . $e->getMessage() . "\n");
-    http_response_code(500);
-    exit();
-}
-
-// Leggi il segreto webhook Stripe
-$endpoint_secret = getenv('STRIPE_WEBHOOK_SECRET');
-
+// Leggi il payload raw
 $payload = @file_get_contents('php://input');
-$sig_header = $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '';
-$event = null;
+logMessage("Payload ricevuto: " . $payload);
 
-file_put_contents('php://stderr', "📥 Webhook ricevuto\n");
+$signature = $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '';
+logMessage("Signature Stripe: " . $signature);
+
+// Chiave segreta webhook (da Stripe Dashboard)
+$endpoint_secret = 'whsec_cEL1I08sLJ8XbJJMnVmSC2GgV0EqXMJh';
+
+require_once 'vendor/autoload.php';
+
+\Stripe\Stripe::setApiKey('tuo_api_key_segreta');
 
 try {
-    $event = \Stripe\Webhook::constructEvent($payload, $sig_header, $endpoint_secret);
-    file_put_contents('php://stderr', "✅ Evento verificato: " . $event->type . "\n");
-} catch (\UnexpectedValueException $e) {
-    file_put_contents('php://stderr', "❌ Payload non valido\n");
-    http_response_code(400);
-    exit();
+    // Verifica la firma e costruisci l'evento Stripe
+    $event = \Stripe\Webhook::constructEvent(
+        $payload, $signature, $endpoint_secret
+    );
+    logMessage("Firma verificata. Evento tipo: " . $event->type);
+
+    // Accedi ai dati evento (puoi adattare a quello che ti serve)
+    $event_id = $event->id;
+    $event_type = $event->type;
+    $event_data = json_encode($event->data->object);
+
+    // Connetti al DB (usa il tuo metodo di connessione)
+    $pdo = new PDO("pgsql:host=tuo_host;port=5432;dbname=stripe_test_hwr1", "tuo_utente", "tua_password");
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+    // Inserisci nel DB
+    $stmt = $pdo->prepare("INSERT INTO stripe_webhooks (event_id, event_type, payload, received_at, processed) VALUES (?, ?, ?, NOW(), false)");
+    $stmt->execute([$event_id, $event_type, $event_data]);
+    logMessage("Evento inserito nel DB con ID evento: " . $event_id);
+
+    // Rispondi a Stripe con 200 OK
+    http_response_code(200);
+    echo json_encode(['status' => 'success']);
+
 } catch (\Stripe\Exception\SignatureVerificationException $e) {
-    file_put_contents('php://stderr', "❌ Firma non valida\n");
+    logMessage("Firma NON valida: " . $e->getMessage());
     http_response_code(400);
-    exit();
+    echo json_encode(['error' => 'Invalid signature']);
+} catch (Exception $e) {
+    logMessage("Errore generico: " . $e->getMessage());
+    http_response_code(500);
+    echo json_encode(['error' => 'Server error']);
 }
 
-try {
-    $stmt = $pdo->prepare("
-        INSERT INTO stripe_webhooks (event_id, event_type, payload, processed)
-        VALUES (:event_id, :event_type, :payload, FALSE)
-        ON CONFLICT (event_id) DO NOTHING
-    ");
-    $stmt->execute([
-        ':event_id' => $event->id,
-        ':event_type' => $event->type,
-        ':payload' => $payload
-    ]);
-    file_put_contents('php://stderr', "💾 Evento salvato nel DB: " . $event->id . "\n");
-} catch (PDOException $e) {
-    file_put_contents('php://stderr', "❌ Errore salvataggio DB: " . $e->getMessage() . "\n");
-}
-
-if ($event->type === 'payment_intent.succeeded') {
-    $paymentIntent = $event->data->object;
-    file_put_contents('php://stderr', "💰 Pagamento riuscito: " . $paymentIntent->id . "\n");
-}
-
-http_response_code(200);
+logMessage("=== Webhook processing finished ===");
 
 ?>
 
