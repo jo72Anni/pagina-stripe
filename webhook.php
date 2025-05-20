@@ -3,7 +3,25 @@ function logMessage($msg) {
     error_log(date('[Y-m-d H:i:s] ') . $msg);
 }
 
-logMessage("=== Webhook test con dati prefissati chiamato ===");
+logMessage("=== Webhook Stripe ricevuto ===");
+
+// Legge il body della richiesta
+$payload = file_get_contents('php://input');
+logMessage("Payload grezzo ricevuto: " . $payload);
+
+// Decodifica JSON
+$data = json_decode($payload, true);
+
+// Controlla se è un JSON valido
+if (!$data) {
+    logMessage("Errore: payload non JSON valido");
+    http_response_code(400);
+    echo json_encode(['error' => 'Invalid JSON']);
+    exit;
+}
+
+// Log della struttura del JSON per debug
+logMessage("Payload decodificato: " . var_export($data, true));
 
 try {
     $pdo = new PDO(
@@ -13,16 +31,12 @@ try {
     );
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    // Dati finti prefissati
-    $event_id = 'evt_test_hardcoded_001';
-    $event_type = 'checkout.session.completed';
-    $payload_serialized = json_encode([
-        "id" => $event_id,
-        "type" => $event_type,
-        "data" => ["object" => ["fake" => "data"]],
-        "created" => time()
-    ]);
+    // Estrazione sicura dei campi
+    $event_id = substr($data['id'] ?? 'missing_id', 0, 255);
+    $event_type = substr($data['type'] ?? 'missing_type', 0, 255);
+    $payload_serialized = substr(json_encode($data), 0, 1000);  // puoi aumentare il limite
 
+    // Inserimento nel DB
     $stmt = $pdo->prepare("
         INSERT INTO stripe_webhooks (event_id, event_type, payload, received_at, processed)
         VALUES (:event_id, :event_type, :payload, NOW(), false)
@@ -33,10 +47,10 @@ try {
         ':payload' => $payload_serialized
     ]);
 
-    logMessage("Inserito evento hardcoded ID $event_id nel DB");
+    logMessage("Evento ID $event_id inserito correttamente nel DB");
 
     http_response_code(200);
-    echo json_encode(['status' => 'ok', 'message' => 'Dati prefissati inseriti']);
+    echo json_encode(['status' => 'ok']);
 
 } catch (Exception $e) {
     logMessage("Errore DB: " . $e->getMessage());
