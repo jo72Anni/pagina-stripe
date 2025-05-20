@@ -101,6 +101,8 @@ function debugSystem() {
 
     return $output;
 }
+
+phpinfo();
 ?>
 
 <!DOCTYPE html>
