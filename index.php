@@ -17,7 +17,7 @@ $product = [
     'sku' => 'ZAINO-ESC-001',
     'image' => 'https://via.placeholder.com/300'
 ];
-
+phpinfo();
 // ========= FUNZIONE DI DEBUG COMPLETA =========
 function debugSystem() {
     $output = "<div class='debug-container'>";
@@ -102,7 +102,7 @@ function debugSystem() {
     return $output;
 }
 
-phpinfo();
+
 ?>
 
 <!DOCTYPE html>
