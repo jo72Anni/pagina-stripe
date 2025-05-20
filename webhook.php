@@ -1,39 +1,27 @@
-
-
 <?php
-// Funzione helper per scrivere nel log di sistema
+// Funzione semplice per logging errori (scrive nel log PHP)
 function logMessage($msg) {
     error_log(date('[Y-m-d H:i:s] ') . $msg);
 }
 
-logMessage("=== Webhook invoked ===");
+logMessage("=== Webhook semplice chiamato ===");
 
 // Leggi il payload raw
-$payload = @file_get_contents('php://input');
+$payload = file_get_contents('php://input');
 logMessage("Payload ricevuto: " . $payload);
 
-// Commenta o rimuovi questa parte:
-// $signature = $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '';
-// logMessage("Signature Stripe: " . $signature);
+// Decodifica JSON
+$data = json_decode($payload, true);
 
-// Chiave segreta webhook (da Stripe Dashboard)
-// $endpoint_secret = 'whsec_cEL1I08sLJ8XbJJMnVmSC2GgV0EqXMJh';
-
-require_once 'vendor/autoload.php';
-
-\Stripe\Stripe::setApiKey('tuo_api_key_segreta');
+if (!$data) {
+    logMessage("Errore: payload non JSON valido");
+    http_response_code(400);
+    echo json_encode(['error' => 'Invalid JSON']);
+    exit;
+}
 
 try {
-    // Bypass della verifica firma: decodifica payload direttamente
-    $event = json_decode($payload);
-    logMessage("Verifica firma bypassata. Evento tipo: " . ($event->type ?? 'undefined'));
-
-    // Accedi ai dati evento (puoi adattare a quello che ti serve)
-    $event_id = $event->id ?? 'test_event_id';
-    $event_type = $event->type ?? 'test_event_type';
-    $event_data = json_encode($event->data->object ?? []);
-
-    // Connetti al DB (usa il tuo metodo di connessione)
+    // Connessione al DB PostgreSQL (adatta i parametri ai tuoi)
     $pdo = new PDO(
         "pgsql:host=dpg-d0chkfh5pdvs73dn6jog-a.oregon-postgres.render.com;port=5432;dbname=stripe_test_hwr1;sslmode=require",
         "stripe_test_hwr1_user",
@@ -41,20 +29,31 @@ try {
     );
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    // Inserisci nel DB
-    $stmt = $pdo->prepare("INSERT INTO stripe_webhooks (event_id, event_type, payload, received_at, processed) VALUES (?, ?, ?, NOW(), false)");
-    $stmt->execute([$event_id, $event_type, $event_data]);
-    logMessage("Evento inserito nel DB con ID evento: " . $event_id);
+    // Estrai campi utili, con fallback a stringhe vuote
+    $event_id = $data['id'] ?? '';
+    $event_type = $data['type'] ?? '';
+    $payload_serialized = json_encode($data);
 
-    // Rispondi a Stripe con 200 OK
+    // Query INSERT
+    $stmt = $pdo->prepare("
+        INSERT INTO stripe_webhooks (event_id, event_type, payload, received_at, processed)
+        VALUES (:event_id, :event_type, :payload, NOW(), false)
+    ");
+    $stmt->execute([
+        ':event_id' => $event_id,
+        ':event_type' => $event_type,
+        ':payload' => $payload_serialized
+    ]);
+
+    logMessage("Inserito evento ID $event_id nel DB");
+
+    // Risposta OK a Stripe
     http_response_code(200);
-    echo json_encode(['status' => 'success']);
+    echo json_encode(['status' => 'ok']);
 
 } catch (Exception $e) {
-    logMessage("Errore generico: " . $e->getMessage());
+    logMessage("Errore DB: " . $e->getMessage());
     http_response_code(500);
-    echo json_encode(['error' => 'Server error']);
+    echo json_encode(['error' => 'DB error']);
 }
-
-logMessage("=== Webhook processing finished ===");
 ?>
