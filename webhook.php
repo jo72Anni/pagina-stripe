@@ -1,16 +1,13 @@
 <?php
-// Funzione semplice per logging errori (scrive nel log PHP)
 function logMessage($msg) {
     error_log(date('[Y-m-d H:i:s] ') . $msg);
 }
 
 logMessage("=== Webhook semplice chiamato ===");
 
-// Leggi il payload raw
 $payload = file_get_contents('php://input');
 logMessage("Payload ricevuto: " . $payload);
 
-// Decodifica JSON
 $data = json_decode($payload, true);
 
 if (!$data) {
@@ -21,7 +18,6 @@ if (!$data) {
 }
 
 try {
-    // Connessione al DB PostgreSQL (adatta i parametri ai tuoi)
     $pdo = new PDO(
         "pgsql:host=dpg-d0chkfh5pdvs73dn6jog-a.oregon-postgres.render.com;port=5432;dbname=stripe_test_hwr1;sslmode=require",
         "stripe_test_hwr1_user",
@@ -29,12 +25,13 @@ try {
     );
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    // Estrai campi utili, con fallback a stringhe vuote
-    $event_id = $data['id'] ?? '';
-    $event_type = $data['type'] ?? '';
-    $payload_serialized = json_encode($data);
+    // Prendi i campi, limitando la lunghezza a 255 caratteri per event_id e event_type
+    $event_id = substr($data['id'] ?? '', 0, 255);
+    $event_type = substr($data['type'] ?? '', 0, 255);
 
-    // Query INSERT
+    // Serializza il payload JSON e tronca a 1000 caratteri (modifica se vuoi)
+    $payload_serialized = substr(json_encode($data), 0, 1000);
+
     $stmt = $pdo->prepare("
         INSERT INTO stripe_webhooks (event_id, event_type, payload, received_at, processed)
         VALUES (:event_id, :event_type, :payload, NOW(), false)
@@ -47,7 +44,6 @@ try {
 
     logMessage("Inserito evento ID $event_id nel DB");
 
-    // Risposta OK a Stripe
     http_response_code(200);
     echo json_encode(['status' => 'ok']);
 
@@ -57,3 +53,4 @@ try {
     echo json_encode(['error' => 'DB error']);
 }
 ?>
+
