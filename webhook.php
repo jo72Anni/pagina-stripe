@@ -3,19 +3,7 @@ function logMessage($msg) {
     error_log(date('[Y-m-d H:i:s] ') . $msg);
 }
 
-logMessage("=== Webhook semplice chiamato ===");
-
-$payload = file_get_contents('php://input');
-logMessage("Payload ricevuto: " . $payload);
-
-$data = json_decode($payload, true);
-
-if (!$data) {
-    logMessage("Errore: payload non JSON valido");
-    http_response_code(400);
-    echo json_encode(['error' => 'Invalid JSON']);
-    exit;
-}
+logMessage("=== Webhook test con dati prefissati chiamato ===");
 
 try {
     $pdo = new PDO(
@@ -25,12 +13,15 @@ try {
     );
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    // Prendi i campi, limitando la lunghezza a 255 caratteri per event_id e event_type
-    $event_id = substr($data['id'] ?? '', 0, 255);
-    $event_type = substr($data['type'] ?? '', 0, 255);
-
-    // Serializza il payload JSON e tronca a 1000 caratteri (modifica se vuoi)
-    $payload_serialized = substr(json_encode($data), 0, 1000);
+    // Dati finti prefissati
+    $event_id = 'evt_test_hardcoded_001';
+    $event_type = 'checkout.session.completed';
+    $payload_serialized = json_encode([
+        "id" => $event_id,
+        "type" => $event_type,
+        "data" => ["object" => ["fake" => "data"]],
+        "created" => time()
+    ]);
 
     $stmt = $pdo->prepare("
         INSERT INTO stripe_webhooks (event_id, event_type, payload, received_at, processed)
@@ -42,10 +33,10 @@ try {
         ':payload' => $payload_serialized
     ]);
 
-    logMessage("Inserito evento ID $event_id nel DB");
+    logMessage("Inserito evento hardcoded ID $event_id nel DB");
 
     http_response_code(200);
-    echo json_encode(['status' => 'ok']);
+    echo json_encode(['status' => 'ok', 'message' => 'Dati prefissati inseriti']);
 
 } catch (Exception $e) {
     logMessage("Errore DB: " . $e->getMessage());
@@ -53,4 +44,3 @@ try {
     echo json_encode(['error' => 'DB error']);
 }
 ?>
-
