@@ -35,7 +35,11 @@ try {
     $event_data = json_encode($event->data->object);
 
     // Connetti al DB (usa il tuo metodo di connessione)
-    $pdo = new PDO("pgsql:host=tuo_host;port=5432;dbname=stripe_test_hwr1", "tuo_utente", "tua_password");
+    $pdo = new PDO(
+    "pgsql:host=dpg-d0chkfh5pdvs73dn6jog-a.oregon-postgres.render.com;port=5432;dbname=stripe_test_hwr1;sslmode=require",
+    "stripe_test_hwr1_user",
+    "ctnl7Y70eQFUNXMOdY1ddREJIm9sVf09"
+);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
     // Inserisci nel DB
