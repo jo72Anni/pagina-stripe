@@ -1,7 +1,5 @@
 <?php
-function logMessage($msg) {
-    error_log(date('[Y-m-d H:i:s] ') . $msg);
-}
+header('Content-Type: application/json');
 
 $payload = file_get_contents('php://input');
 $data = json_decode($payload, true);
@@ -63,8 +61,8 @@ try {
 
     echo json_encode(['status' => 'ignored']);
 } catch (Exception $e) {
-    error_log("DB error: " . $e->getMessage());
     http_response_code(500);
-    echo json_encode(['error' => $e->getMessage()]);
+    // Ritorna l'errore completo in risposta per debug
+    echo json_encode(['error' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()]);
+    exit;
 }
-?>
