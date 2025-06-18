@@ -1,174 +1,138 @@
 <?php
 // ==============================================
-// CONFIGURAZIONE INIZIALE
+// CONFIGURAZIONE COMPLETA DEL WEBHOOK
 // ==============================================
 header('Content-Type: application/json');
-ini_set('display_errors', 0); // Disabilita output errori in produzione
-error_reporting(E_ALL); // Registra tutti gli errori nel log
+require_once 'vendor/autoload.php';
 
-// Carica le variabili d'ambiente
-$config = [
-    'debug' => filter_var(getenv('APP_DEBUG'), FILTER_VALIDATE_BOOLEAN),
-    'database' => parse_url(getenv('DATABASE_URL')),
-    'stripe' => [
-        'webhook_secret' => getenv('STRIPE_WEBHOOK_SECRET'),
-        'api_key' => getenv('STRIPE_SECRET_KEY')
-    ],
-    'logging' => [
-        'file' => getenv('LOG_FILE') ?: __DIR__.'/logs/stripe_webhook.log',
-        'level' => 'debug'
-    ],
-    'email' => [
-        'sender' => getenv('SENDER_EMAIL'),
-        'test' => getenv('TEST_EMAIL')
-    ]
-];
+// Configurazione logging avanzato
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+ini_set('error_log', getenv('LOG_FILE') ?: __DIR__.'/stripe_webhook_errors.log');
 
 // ==============================================
-// FUNZIONI DI UTILITY
+// INIZIALIZZAZIONE DATABASE
 // ==============================================
-function logEvent($message, $context = [], $level = 'info') {
-    global $config;
-    
-    $logEntry = sprintf(
-        "[%s] %s: %s %s\n",
-        date('Y-m-d H:i:s'),
-        strtoupper($level),
-        $message,
-        !empty($context) ? json_encode($context, JSON_PRETTY_PRINT) : ''
-    );
-    
-    // Crea la directory se non esiste
-    if (!is_dir(dirname($config['logging']['file']))) {
-        mkdir(dirname($config['logging']['file']), 0755, true);
-    }
-    
-    file_put_contents($config['logging']['file'], $logEntry, FILE_APPEND);
-    
-    if ($config['debug']) {
-        error_log($logEntry);
-    }
-}
+$db_url = parse_url(getenv('DATABASE_URL'));
 
-// ==============================================
-// CONNESSIONE AL DATABASE
-// ==============================================
 try {
     $db = new PDO(
-        sprintf(
-            "pgsql:host=%s;port=%s;dbname=%s;sslmode=require",
-            $config['database']['host'],
-            $config['database']['port'],
-            ltrim($config['database']['path'], '/')
-        ),
-        $config['database']['user'],
-        $config['database']['pass'],
+        "pgsql:host={$db_url['host']};port={$db_url['port']};dbname=".ltrim($db_url['path'], '/').";sslmode=require",
+        $db_url['user'],
+        $db_url['pass'],
         [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_TIMEOUT => 5,
-            PDO::ATTR_PERSISTENT => false,
+            PDO::ATTR_EMULATE_PREPARES => false,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
         ]
     );
-    
-    logEvent("Connessione al database stabilita con successo");
 } catch (PDOException $e) {
-    logEvent("Errore connessione database", ['error' => $e->getMessage()], 'error');
+    error_log("[DB CONNECTION FAILED] ".$e->getMessage());
     http_response_code(500);
-    die(json_encode(['error' => 'Database connection error']));
+    die(json_encode([
+        'status' => 'error',
+        'message' => 'Database connection failed',
+        'error_code' => 'db_connection_failed'
+    ]));
 }
 
 // ==============================================
-// ELABORAZIONE WEBHOOK
+// GESTIONE RICHIESTA WEBHOOK
 // ==============================================
+$payload = @file_get_contents('php://input');
+$sig_header = $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '';
+
 try {
-    // Verifica metodo HTTP
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        throw new Exception("Metodo non consentito");
-    }
-
-    // Leggi il payload
-    $payload = @file_get_contents('php://input');
+    // 1. Validazione del payload
     if (empty($payload)) {
-        throw new Exception("Payload vuoto");
-    }
-    
-    logEvent("Payload ricevuto", ['headers' => getallheaders()], 'debug');
-
-    // Verifica la firma del webhook
-    $sig_header = $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '';
-    $event = null;
-    
-    try {
-        $event = \Stripe\Webhook::constructEvent(
-            $payload,
-            $sig_header,
-            $config['stripe']['webhook_secret']
-        );
-    } catch(\UnexpectedValueException $e) {
-        throw new Exception("Payload JSON non valido");
-    } catch(\Stripe\Exception\SignatureVerificationException $e) {
-        throw new Exception("Firma webhook non valida");
+        throw new Exception("Empty payload received");
     }
 
-    logEvent("Evento Stripe validato", ['event_id' => $event->id, 'type' => $event->type]);
+    // 2. Verifica la firma Stripe
+    $event = \Stripe\Webhook::constructEvent(
+        $payload,
+        $sig_header,
+        getenv('STRIPE_WEBHOOK_SECRET')
+    );
 
-    // Prepara i dati per il database
+    // 3. Estrazione dati avanzata
     $eventData = $event->data->object;
+    $customerDetails = $eventData->customer_details ?? null;
+    
     $dbData = [
-        ':event_id' => $event->id,
-        ':event_type' => $event->type,
-        ':customer_email' => $eventData->customer_details->email ?? null,
-        ':customer_name' => $eventData->customer_details->name ?? null,
-        ':amount_total' => $eventData->amount_total ?? null,
-        ':currency' => $eventData->currency ?? null,
-        ':payment_status' => $eventData->payment_status ?? null,
-        ':raw_payload' => json_encode($event)
+        'event_id' => $event->id,
+        'event_type' => $event->type,
+        'customer_email' => $customerDetails->email ?? $eventData->customer_email ?? null,
+        'customer_name' => $customerDetails->name ?? null,
+        'amount' => $eventData->amount ?? $eventData->amount_total ?? null,
+        'currency' => $eventData->currency ?? null,
+        'payment_status' => $eventData->payment_status ?? null,
+        'created' => date('Y-m-d H:i:s', $event->created),
+        'raw_data' => json_encode($event)
     ];
 
-    // Inserimento nel database
+    // 4. Inserimento transazionale
+    $db->beginTransaction();
+    
     $stmt = $db->prepare("
         INSERT INTO stripe_webhooks (
-            event_id, event_type, customer_email,
-            customer_name, amount_total, currency,
-            payment_status, raw_payload
+            event_id, event_type, customer_email, customer_name,
+            amount, currency, payment_status, created, raw_data
         ) VALUES (
-            :event_id, :event_type, :customer_email,
-            :customer_name, :amount_total, :currency,
-            :payment_status, :raw_payload
+            :event_id, :event_type, :customer_email, :customer_name,
+            :amount, :currency, :payment_status, :created, :raw_data
         )
+        ON CONFLICT (event_id) DO NOTHING
     ");
-    
-    $stmt->execute($dbData);
-    $insertId = $db->lastInsertId();
-    
-    logEvent("Evento registrato nel database", ['db_id' => $insertId]);
 
-    // Risposta di successo
-    http_response_code(200);
+    $stmt->execute($dbData);
+    
+    // 5. Verifica inserimento
+    if ($stmt->rowCount() === 0) {
+        error_log("[DUPLICATE EVENT] Event ID: ".$event->id);
+        $db->rollBack();
+    } else {
+        $db->commit();
+    }
+
+    // 6. Risposta JSON completa
     echo json_encode([
         'status' => 'success',
         'event_id' => $event->id,
         'type' => $event->type,
-        'database_id' => $insertId
+        'timestamp' => $event->created,
+        'database_id' => $db->lastInsertId()
     ]);
 
-} catch (Exception $e) {
-    logEvent("Errore elaborazione webhook", [
-        'error' => $e->getMessage(),
-        'trace' => $config['debug'] ? $e->getTraceAsString() : null
-    ], 'error');
-    
+} catch (\Stripe\Exception\SignatureVerificationException $e) {
+    http_response_code(403);
+    echo json_encode([
+        'status' => 'error',
+        'message' => 'Invalid signature',
+        'error_code' => 'invalid_signature'
+    ]);
+} catch (\UnexpectedValueException $e) {
     http_response_code(400);
     echo json_encode([
         'status' => 'error',
-        'message' => $e->getMessage()
+        'message' => 'Invalid payload',
+        'error_code' => 'invalid_payload'
     ]);
+} catch (Exception $e) {
+    error_log("[PROCESSING ERROR] ".$e->getMessage());
+    http_response_code(500);
+    echo json_encode([
+        'status' => 'error',
+        'message' => $e->getMessage(),
+        'error_code' => 'processing_error'
+    ]);
+    
+    if (isset($db) && $db->inTransaction()) {
+        $db->rollBack();
+    }
 }
 
-// ==============================================
-// PULIZIA FINALE
-// ==============================================
+// Chiusura connessione
 $db = null;
-logEvent("Elaborazione completata");
 ?>
