@@ -1,77 +1,132 @@
 <?php
 // ==============================================
-// WEBHOOK COMPLETO PER STRIPE
+// CONFIGURAZIONE INIZIALE
 // ==============================================
-
-// Configurazione iniziale
 header('Content-Type: application/json');
-define('LOG_FILE', __DIR__.'/stripe_webhook.log');
-date_default_timezone_set('Europe/Rome');
+ini_set('display_errors', 0); // Disabilita output errori in produzione
+error_reporting(E_ALL); // Registra tutti gli errori nel log
 
-// Funzione di logging avanzata
-function logMessage($message, $context = []) {
-    $logEntry = date('[Y-m-d H:i:s]')." ".$message."\n";
-    if (!empty($context)) {
-        $logEntry .= "Context: ".json_encode($context, JSON_PRETTY_PRINT)."\n";
-    }
-    file_put_contents(LOG_FILE, $logEntry, FILE_APPEND);
-}
+// Carica le variabili d'ambiente
+$config = [
+    'debug' => filter_var(getenv('APP_DEBUG'), FILTER_VALIDATE_BOOLEAN),
+    'database' => parse_url(getenv('DATABASE_URL')),
+    'stripe' => [
+        'webhook_secret' => getenv('STRIPE_WEBHOOK_SECRET'),
+        'api_key' => getenv('STRIPE_SECRET_KEY')
+    ],
+    'logging' => [
+        'file' => getenv('LOG_FILE') ?: __DIR__.'/logs/stripe_webhook.log',
+        'level' => 'debug'
+    ],
+    'email' => [
+        'sender' => getenv('SENDER_EMAIL'),
+        'test' => getenv('TEST_EMAIL')
+    ]
+];
 
-// Inizializzazione
-logMessage("=== NUOVA RICHIESTA WEBHOOK ===");
-
-try {
-    // 1. Connessione al Database PostgreSQL
-    $dbUrl = parse_url(getenv('DATABASE_URL'));
-    $dsn = sprintf(
-        "pgsql:host=%s;port=%s;dbname=%s;sslmode=require",
-        $dbUrl['host'],
-        $dbUrl['port'],
-        ltrim($dbUrl['path'], '/')
+// ==============================================
+// FUNZIONI DI UTILITY
+// ==============================================
+function logEvent($message, $context = [], $level = 'info') {
+    global $config;
+    
+    $logEntry = sprintf(
+        "[%s] %s: %s %s\n",
+        date('Y-m-d H:i:s'),
+        strtoupper($level),
+        $message,
+        !empty($context) ? json_encode($context, JSON_PRETTY_PRINT) : ''
     );
     
-    $db = new PDO($dsn, $dbUrl['user'], $dbUrl['pass'], [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_TIMEOUT => 5,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_PERSISTENT => false
-    ]);
+    // Crea la directory se non esiste
+    if (!is_dir(dirname($config['logging']['file']))) {
+        mkdir(dirname($config['logging']['file']), 0755, true);
+    }
     
-    logMessage("Connessione al database riuscita");
+    file_put_contents($config['logging']['file'], $logEntry, FILE_APPEND);
+    
+    if ($config['debug']) {
+        error_log($logEntry);
+    }
+}
 
-    // 2. Validazione del payload
-    $payload = json_decode(file_get_contents('php://input'), true);
-    if (json_last_error() !== JSON_ERROR_NONE) {
+// ==============================================
+// CONNESSIONE AL DATABASE
+// ==============================================
+try {
+    $db = new PDO(
+        sprintf(
+            "pgsql:host=%s;port=%s;dbname=%s;sslmode=require",
+            $config['database']['host'],
+            $config['database']['port'],
+            ltrim($config['database']['path'], '/')
+        ),
+        $config['database']['user'],
+        $config['database']['pass'],
+        [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_TIMEOUT => 5,
+            PDO::ATTR_PERSISTENT => false,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+        ]
+    );
+    
+    logEvent("Connessione al database stabilita con successo");
+} catch (PDOException $e) {
+    logEvent("Errore connessione database", ['error' => $e->getMessage()], 'error');
+    http_response_code(500);
+    die(json_encode(['error' => 'Database connection error']));
+}
+
+// ==============================================
+// ELABORAZIONE WEBHOOK
+// ==============================================
+try {
+    // Verifica metodo HTTP
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        throw new Exception("Metodo non consentito");
+    }
+
+    // Leggi il payload
+    $payload = @file_get_contents('php://input');
+    if (empty($payload)) {
+        throw new Exception("Payload vuoto");
+    }
+    
+    logEvent("Payload ricevuto", ['headers' => getallheaders()], 'debug');
+
+    // Verifica la firma del webhook
+    $sig_header = $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '';
+    $event = null;
+    
+    try {
+        $event = \Stripe\Webhook::constructEvent(
+            $payload,
+            $sig_header,
+            $config['stripe']['webhook_secret']
+        );
+    } catch(\UnexpectedValueException $e) {
         throw new Exception("Payload JSON non valido");
-    }
-    
-    logMessage("Payload ricevuto", ['payload' => $payload]);
-
-    // 3. Verifica campi obbligatori
-    $requiredFields = ['id', 'type', 'data'];
-    foreach ($requiredFields as $field) {
-        if (!isset($payload[$field])) {
-            throw new Exception("Campo obbligatorio mancante: $field");
-        }
+    } catch(\Stripe\Exception\SignatureVerificationException $e) {
+        throw new Exception("Firma webhook non valida");
     }
 
-    // 4. Estrazione dati
-    $eventId = $payload['id'];
-    $eventType = $payload['type'];
-    $eventData = $payload['data']['object'] ?? [];
-    
+    logEvent("Evento Stripe validato", ['event_id' => $event->id, 'type' => $event->type]);
+
+    // Prepara i dati per il database
+    $eventData = $event->data->object;
     $dbData = [
-        ':event_id' => $eventId,
-        ':event_type' => $eventType,
-        ':customer_email' => $eventData['customer_email'] ?? $eventData['customer_details']['email'] ?? null,
-        ':customer_name' => $eventData['customer_name'] ?? $eventData['customer_details']['name'] ?? null,
-        ':amount_total' => $eventData['amount_total'] ?? null,
-        ':currency' => $eventData['currency'] ?? null,
-        ':payment_status' => $eventData['payment_status'] ?? null,
-        ':raw_payload' => json_encode($payload)
+        ':event_id' => $event->id,
+        ':event_type' => $event->type,
+        ':customer_email' => $eventData->customer_details->email ?? null,
+        ':customer_name' => $eventData->customer_details->name ?? null,
+        ':amount_total' => $eventData->amount_total ?? null,
+        ':currency' => $eventData->currency ?? null,
+        ':payment_status' => $eventData->payment_status ?? null,
+        ':raw_payload' => json_encode($event)
     ];
 
-    // 5. Inserimento nel database
+    // Inserimento nel database
     $stmt = $db->prepare("
         INSERT INTO stripe_webhooks (
             event_id, event_type, customer_email,
@@ -83,30 +138,27 @@ try {
             :payment_status, :raw_payload
         )
     ");
-
+    
     $stmt->execute($dbData);
     $insertId = $db->lastInsertId();
     
-    logMessage("Evento registrato con ID: $insertId", ['event_id' => $eventId]);
+    logEvent("Evento registrato nel database", ['db_id' => $insertId]);
 
-    // 6. Risposta di successo
+    // Risposta di successo
+    http_response_code(200);
     echo json_encode([
         'status' => 'success',
-        'event_id' => $eventId,
+        'event_id' => $event->id,
+        'type' => $event->type,
         'database_id' => $insertId
     ]);
 
-} catch (PDOException $e) {
-    logMessage("Errore database", ['error' => $e->getMessage()]);
-    http_response_code(500);
-    echo json_encode([
-        'status' => 'error',
-        'message' => 'Database error',
-        'error' => $e->getMessage()
-    ]);
-    
 } catch (Exception $e) {
-    logMessage("Errore elaborazione", ['error' => $e->getMessage()]);
+    logEvent("Errore elaborazione webhook", [
+        'error' => $e->getMessage(),
+        'trace' => $config['debug'] ? $e->getTraceAsString() : null
+    ], 'error');
+    
     http_response_code(400);
     echo json_encode([
         'status' => 'error',
@@ -114,58 +166,9 @@ try {
     ]);
 }
 
-// Chiusura connessione
-$db = null;
-logMessage("=== FINE ELABORAZIONE ===");
-?>($payload[$field])) {
-            throw new Exception("Campo mancante: $field");
-        }
-    }
-
-    $eventId = $payload['id'];
-    $eventType = $payload['type'];
-    $eventData = $payload['data']['object'] ?? [];
-
-    // Prepara dati per il database
-    $dbData = [
-        ':event_id' => $eventId,
-        ':event_type' => $eventType,
-        ':customer_email' => $eventData['customer_email'] ?? $eventData['customer_details']['email'] ?? null,
-        ':customer_name' => $eventData['customer_name'] ?? $eventData['customer_details']['name'] ?? null,
-        ':amount_total' => $eventData['amount_total'] ?? null,
-        ':payment_status' => $eventData['payment_status'] ?? null,
-        ':raw_payload' => json_encode($payload)
-    ];
-
-    // Query di inserimento
-    $stmt = $db->prepare("
-        INSERT INTO stripe_webhooks (
-            event_id, event_type, customer_email,
-            customer_name, amount_total, payment_status,
-            raw_payload
-        ) VALUES (
-            :event_id, :event_type, :customer_email,
-            :customer_name, :amount_total, :payment_status,
-            :raw_payload
-        )
-    ");
-
-    $stmt->execute($dbData);
-    
-    file_put_contents(LOG_FILE, date('[Y-m-d H:i:s]')." Evento registrato: $eventId\n", FILE_APPEND);
-    echo json_encode(['success' => true]);
-
-} catch (Exception $e) {
-    logError($e->getMessage(), [
-        'payload' => $payload ?? null,
-        'trace' => $e->getTraceAsString()
-    ]);
-    http_response_code(400);
-    echo json_encode(['error' => $e->getMessage()]);
-}
-
 // ==============================================
-// CHIUSURA CONNESSIONE
+// PULIZIA FINALE
 // ==============================================
 $db = null;
+logEvent("Elaborazione completata");
 ?>
