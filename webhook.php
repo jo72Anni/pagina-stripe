@@ -3,24 +3,14 @@ function logMessage($msg) {
     error_log(date('[Y-m-d H:i:s] ') . $msg);
 }
 
-logMessage("=== Webhook Stripe ricevuto ===");
-
-// Legge il body della richiesta
 $payload = file_get_contents('php://input');
-logMessage("Payload grezzo ricevuto: " . $payload);
-
-// Decodifica JSON
 $data = json_decode($payload, true);
 
-// Controlla se è un JSON valido
 if (!$data) {
-    logMessage("Errore: payload non JSON valido");
     http_response_code(400);
     echo json_encode(['error' => 'Invalid JSON']);
     exit;
 }
-
-logMessage("Payload decodificato: " . var_export($data, true));
 
 try {
     $pdo = new PDO(
@@ -30,29 +20,51 @@ try {
     );
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    // Inserisci evento in stripe_webhooks
-    $event_id = substr($data['id'] ?? 'missing_id', 0, 255);
-    $event_type = substr($data['type'] ?? 'missing_type', 0, 255);
-    $payload_serialized = substr(json_encode($data), 0, 10000);
+    if (($data['type'] ?? '') === 'checkout.session.completed') {
+        $session = $data['data']['object'] ?? null;
+        if ($session) {
+            $stmt = $pdo->prepare("
+                INSERT INTO stripe_payments (
+                    session_id,
+                    customer_email,
+                    customer_name,
+                    product_id,
+                    sku,
+                    quantity,
+                    amount_total,
+                    created_at
+                ) VALUES (
+                    :session_id,
+                    :customer_email,
+                    :customer_name,
+                    :product_id,
+                    :sku,
+                    :quantity,
+                    :amount_total,
+                    NOW()
+                )
+                ON CONFLICT (session_id) DO NOTHING
+            ");
 
-    $stmt = $pdo->prepare("
-        INSERT INTO stripe_webhooks (event_id, event_type, payload, received_at, processed)
-        VALUES (:event_id, :event_type, :payload, NOW(), false)
-        ON CONFLICT (event_id) DO NOTHING
-    ");
-    $stmt->execute([
-        ':event_id' => $event_id,
-        ':event_type' => $event_type,
-        ':payload' => $payload_serialized
-    ]);
-    logMessage("Evento ID $event_id inserito correttamente in stripe_webhooks");
+            $stmt->execute([
+                ':session_id' => $session['session_id'] ?? null,
+                ':customer_email' => $session['customer_email'] ?? null,
+                ':customer_name' => $session['customer_name'] ?? null,
+                ':product_id' => $session['product_id'] ?? null,
+                ':sku' => $session['sku'] ?? null,
+                ':quantity' => $session['quantity'] ?? null,
+                ':amount_total' => $session['amount_total'] ?? null,
+            ]);
 
-    http_response_code(200);
-    echo json_encode(['status' => 'ok']);
+            echo json_encode(['status' => 'ok']);
+            exit;
+        }
+    }
 
+    echo json_encode(['status' => 'ignored']);
 } catch (Exception $e) {
-    logMessage("Errore DB: " . $e->getMessage());
+    error_log("DB error: " . $e->getMessage());
     http_response_code(500);
-    echo json_encode(['error' => 'DB error', 'message' => $e->getMessage()]);
+    echo json_encode(['error' => $e->getMessage()]);
 }
 ?>
