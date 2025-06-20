@@ -1,7 +1,7 @@
 <?php
 require 'vendor/autoload.php';
 
-// Controlla se il file .env esiste prima di caricarlo
+// Carica variabili da .env se presente
 if (file_exists(__DIR__ . '/.env')) {
     $dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
     $dotenv->load();
@@ -9,12 +9,20 @@ if (file_exists(__DIR__ . '/.env')) {
 
 \Stripe\Stripe::setApiKey($_ENV['STRIPE_SECRET_KEY']);
 
+// Legge i dati dal body JSON
 $data = json_decode(file_get_contents('php://input'), true);
 
 try {
+    // ✅ 1. Crea il customer con nome ed email
+    $customer = \Stripe\Customer::create([
+        'email' => $data['email'],
+        'name' => $data['customer_name'],
+    ]);
+
+    // ✅ 2. Crea la sessione di pagamento usando il customer appena creato
     $session = \Stripe\Checkout\Session::create([
         'payment_method_types' => ['card'],
-        'customer_email' => $data['email'],
+        'customer' => $customer->id, // associamo il customer esplicitamente
         'line_items' => [[
             'price_data' => [
                 'currency' => 'eur',
@@ -25,7 +33,7 @@ try {
                         'customer_name' => $data['customer_name']
                     ],
                 ],
-                'unit_amount' => (int)$data['price'], // già in centesimi
+                'unit_amount' => (int)$data['price'], // importo in centesimi
             ],
             'quantity' => (int)$data['quantity'],
         ]],
@@ -40,6 +48,7 @@ try {
         'client_reference_id' => uniqid('client_'),
     ]);
 
+    // ✅ 3. Risponde con l'ID della sessione
     header('Content-Type: application/json');
     echo json_encode(['sessionId' => $session->id]);
 
@@ -47,3 +56,5 @@ try {
     http_response_code(400);
     echo json_encode(['error' => $e->getMessage()]);
 }
+
+?>
