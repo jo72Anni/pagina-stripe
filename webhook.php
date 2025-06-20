@@ -1,6 +1,6 @@
 <?php
 // Configurazione
-$host = "dpg-..."; // (come prima)
+$host = "dpg-d19h6lfgi27c73crpsrg-a.oregon-postgres.render.com";
 $port = "5432";
 $dbname = "stripe_test_ase0";
 $user = "stripe_test_ase0_user";
