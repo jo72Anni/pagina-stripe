@@ -2,29 +2,31 @@
 // Carica la libreria Stripe (assicurati di aver installato con: composer require stripe/stripe-php)
 require_once 'vendor/autoload.php';
 
-// Prendi DATABASE_URL dalle variabili d'ambiente
-$database_url = getenv('DATABASE_URL');
+// Ottieni DATABASE_URL dalle variabili d'ambiente
+$databaseUrl = getenv('DATABASE_URL');
 
-if (!$database_url) {
-    error_log("[STRIPE_WEBHOOK] Variabile DATABASE_URL non impostata");
+if (!$databaseUrl) {
+    error_log("[STRIPE_WEBHOOK] Variabile DATABASE_URL non trovata");
     http_response_code(500);
     exit;
 }
 
-// Parsiamo la URL in componenti
-$dbopts = parse_url($database_url);
+// Parsing della URL per estrarre i componenti
+$dbOptions = parse_url($databaseUrl);
 
-$host = $dbopts['host'] ?? null;
-$port = $dbopts['port'] ?? null;
-$dbname = isset($dbopts['path']) ? ltrim($dbopts['path'], '/') : null;
-$user = $dbopts['user'] ?? null;
-$password = $dbopts['pass'] ?? null;
+$host = $dbOptions['host'] ?? null;
+$port = $dbOptions['port'] ?? null;
+$dbName = isset($dbOptions['path']) ? ltrim($dbOptions['path'], '/') : null;
+$user = $dbOptions['user'] ?? null;
+$password = $dbOptions['pass'] ?? null;
 
-if (!$host || !$port || !$dbname || !$user || !$password) {
-    error_log("[STRIPE_WEBHOOK] DATABASE_URL malformata");
+// Verifica che tutti i componenti siano presenti
+if (!$host || !$port || !$dbName || !$user || !$password) {
+    error_log("[STRIPE_WEBHOOK] DATABASE_URL non valida o incompleta");
     http_response_code(500);
     exit;
 }
+
 
 // Costruiamo la stringa di connessione
 $conn_string = "host=$host port=$port dbname=$dbname user=$user password=$password sslmode=require";
