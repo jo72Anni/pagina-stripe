@@ -2,19 +2,33 @@
 // Carica la libreria Stripe (assicurati di aver installato con: composer require stripe/stripe-php)
 require_once 'vendor/autoload.php';
 
-// Configurazione database con variabili d'ambiente
-$db_config = [
-    'host'     => getenv('DB_HOST') ?: 'dpg-d19h6lfgi27c73crpsrg-a.oregon-postgres.render.com',
-    'port'     => getenv('DB_PORT') ?: '5432',
-    'dbname'   => getenv('DB_NAME') ?: 'stripe_test_ase0',
-    'user'     => getenv('DB_USER') ?: 'stripe_test_ase0_user',
-    'password' => getenv('DB_PASSWORD') ?: '0zMaW0fLMN9N8XCgHJqQZ7gevMesVeCZ'
-];
+// Prendi DATABASE_URL dalle variabili d'ambiente
+$database_url = getenv('DATABASE_URL');
 
-// Connessione al database PostgreSQL
-$conn_string = "host={$db_config['host']} port={$db_config['port']} dbname={$db_config['dbname']} 
-                user={$db_config['user']} password={$db_config['password']} sslmode=require";
-                
+if (!$database_url) {
+    error_log("[STRIPE_WEBHOOK] Variabile DATABASE_URL non impostata");
+    http_response_code(500);
+    exit;
+}
+
+// Parsiamo la URL in componenti
+$dbopts = parse_url($database_url);
+
+$host = $dbopts['host'] ?? null;
+$port = $dbopts['port'] ?? null;
+$dbname = isset($dbopts['path']) ? ltrim($dbopts['path'], '/') : null;
+$user = $dbopts['user'] ?? null;
+$password = $dbopts['pass'] ?? null;
+
+if (!$host || !$port || !$dbname || !$user || !$password) {
+    error_log("[STRIPE_WEBHOOK] DATABASE_URL malformata");
+    http_response_code(500);
+    exit;
+}
+
+// Costruiamo la stringa di connessione
+$conn_string = "host=$host port=$port dbname=$dbname user=$user password=$password sslmode=require";
+
 $conn = pg_connect($conn_string);
 
 if (!$conn) {
@@ -22,6 +36,7 @@ if (!$conn) {
     http_response_code(500);
     exit;
 }
+
 
 // Configura la chiave segreta di Stripe
 \Stripe\Stripe::setApiKey(getenv('STRIPE_SECRET_KEY'));
