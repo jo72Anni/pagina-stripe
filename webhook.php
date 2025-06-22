@@ -2,42 +2,72 @@
 // Carica la libreria Stripe (assicurati di aver installato con: composer require stripe/stripe-php)
 require_once 'vendor/autoload.php';
 
-// Ottieni DATABASE_URL dalle variabili d'ambiente
+// Ottieni DATABASE_URL dalle variabili d'ambiente con fallback a un valore predefinito se necessario
 $databaseUrl = getenv('DATABASE_URL');
 
-if (!$databaseUrl) {
-    error_log("[STRIPE_WEBHOOK] Variabile DATABASE_URL non trovata");
+if (empty($databaseUrl)) {
+    error_log("[STRIPE_WEBHOOK] ERRORE: Variabile DATABASE_URL non trovata o vuota");
     http_response_code(500);
-    exit;
+    exit(json_encode(['error' => 'Configurazione database mancante']));
 }
 
-// Parsing della URL per estrarre i componenti
+// Parsing della URL per estrarre i componenti con gestione degli errori
 $dbOptions = parse_url($databaseUrl);
-
-$host = $dbOptions['host'] ?? null;
-$port = $dbOptions['port'] ?? null;
-$dbName = isset($dbOptions['path']) ? ltrim($dbOptions['path'], '/') : null;
-$user = $dbOptions['user'] ?? null;
-$password = $dbOptions['pass'] ?? null;
-
-// Verifica che tutti i componenti siano presenti
-if (!$host || !$port || !$dbName || !$user || !$password) {
-    error_log("[STRIPE_WEBHOOK] DATABASE_URL non valida o incompleta");
+if ($dbOptions === false) {
+    error_log("[STRIPE_WEBHOOK] ERRORE: Parsing DATABASE_URL fallito - URL malformata");
     http_response_code(500);
-    exit;
+    exit(json_encode(['error' => 'Configurazione database non valida']));
 }
 
+// Estrazione e validazione dei parametri
+$host = $dbOptions['host'] ?? null;
+$port = $dbOptions['port'] ?? '5432'; // Default PostgreSQL port
+$dbName = isset($dbOptions['path']) ? trim($dbOptions['path'], '/') : null;
+$user = $dbOptions['user'] ?? null;
+$password = isset($dbOptions['pass']) ? urldecode($dbOptions['pass']) : null;
 
-// Costruiamo la stringa di connessione
-$conn_string = "host=$host port=$port dbname=$dbname user=$user password=$password sslmode=require";
+// Verifica che tutti i componenti obbligatori siano presenti
+$missingParams = [];
+if (empty($host)) $missingParams[] = 'host';
+if (empty($dbName)) $missingParams[] = 'dbname';
+if (empty($user)) $missingParams[] = 'user';
+if (empty($password)) $missingParams[] = 'password';
 
-$conn = pg_connect($conn_string);
+if (!empty($missingParams)) {
+    error_log("[STRIPE_WEBHOOK] ERRORE: DATABASE_URL incompleta - Parametri mancanti: " . implode(', ', $missingParams));
+    http_response_code(500);
+    exit(json_encode(['error' => 'Configurazione database incompleta']));
+}
+
+// Correzione: c'era una discrepanza tra $dbName (maiuscolo) e $dbname (minuscolo)
+$dbname = $dbName; // Uniformiamo le variabili
+
+// Costruzione della stringa di connessione con parametri aggiuntivi per Render.com
+$conn_string = sprintf(
+    "host=%s port=%s dbname=%s user=%s password=%s sslmode=require",
+    $host,
+    $port,
+    $dbname,
+    $user,
+    $password
+);
+
+// Tentativo di connessione con timeout
+$conn = pg_connect($conn_string . " connect_timeout=5");
 
 if (!$conn) {
-    error_log("[STRIPE_WEBHOOK] Errore connessione database: " . pg_last_error());
+    $errorMsg = pg_last_error();
+    error_log("[STRIPE_WEBHOOK] ERRORE CONNESSIONE DB: " . $errorMsg);
+    error_log("[STRIPE_WEBHOOK] Stringa connessione: " . str_replace($password, '*****', $conn_string));
     http_response_code(500);
-    exit;
+    exit(json_encode([
+        'error' => 'Database connection failed',
+        'details' => $errorMsg
+    ]));
 }
+
+// Impostiamo il client encoding a UTF-8 per evitare problemi con i caratteri speciali
+pg_set_client_encoding($conn, 'UTF-8');
 
 
 // Configura la chiave segreta di Stripe
