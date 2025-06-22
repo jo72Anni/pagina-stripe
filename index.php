@@ -1,55 +1,88 @@
 <?php
-// Imposta intestazione HTML
-header('Content-Type: text/html; charset=utf-8');
+// Test Connessione PostgreSQL usando DATABASE_URL come variabile d'ambiente
 
-// Ottieni DATABASE_URL dalle variabili d'ambiente
-$databaseUrl = getenv('DATABASE_URL');
+// Recupera la DATABASE_URL
+$database_url = getenv('DATABASE_URL');
 
-// Output HTML iniziale
-echo "<h1>Test Connessione DB con <code>DATABASE_URL</code></h1>";
-
-if (!$databaseUrl) {
-    echo "<p style='color:red;'>❌ Variabile <code>DATABASE_URL</code> non trovata nell'ambiente.</p>";
-    exit;
+function html_escape($str) {
+    return htmlspecialchars($str, ENT_QUOTES, 'UTF-8');
 }
 
-// Parsiamo la URL in componenti
-$dbopts = parse_url($databaseUrl);
+?><!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>Test Connessione DB con DATABASE_URL</title>
+    <style>
+        body { font-family: sans-serif; padding: 2rem; background: #f9f9f9; }
+        table { border-collapse: collapse; margin-top: 1rem; width: 100%; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        th { background: #eee; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+<h1>Test Connessione DB con DATABASE_URL</h1>
 
-// Estraiamo i parametri
-$host     = $dbopts['host'] ?? '';
-$port     = $dbopts['port'] ?? '';
-$user     = $dbopts['user'] ?? '';
+<?php if (!$database_url): ?>
+    <p class="error">❌ Variabile d'ambiente <strong>DATABASE_URL</strong> non trovata.</p>
+    <?php exit; ?>
+<?php endif; ?>
+
+<?php
+// Parsing della DATABASE_URL (es: postgres://user:pass@host:port/dbname)
+$dbopts = parse_url($database_url);
+
+$host = $dbopts['host'] ?? '';
+$port = $dbopts['port'] ?? '';
+$user = $dbopts['user'] ?? '';
 $password = $dbopts['pass'] ?? '';
-$dbname   = isset($dbopts['path']) ? ltrim($dbopts['path'], '/') : '';
+$dbname = isset($dbopts['path']) ? ltrim($dbopts['path'], '/') : '';
 
-// Mostriamo i parametri estratti
-echo "<h3>Parametri estratti da DATABASE_URL</h3>";
-echo "<table border='1' cellpadding='5' cellspacing='0'>";
-echo "<tr><th>Parametro</th><th>Valore</th></tr>";
-echo "<tr><td>host</td><td>$host</td></tr>";
-echo "<tr><td>port</td><td>$port</td></tr>";
-echo "<tr><td>user</td><td>$user</td></tr>";
-echo "<tr><td>password</td><td>********</td></tr>";
-echo "<tr><td>dbname</td><td>$dbname</td></tr>";
-echo "</table>";
+$missing = [];
+if (!$host) $missing[] = 'host';
+if (!$port) $missing[] = 'port';
+if (!$user) $missing[] = 'user';
+if (!$password) $missing[] = 'password';
+if (!$dbname) $missing[] = 'dbname';
 
-// Costruzione stringa di connessione
-$conn_string = "host=$host port=$port dbname=$dbname user=$user password=$password sslmode=require";
-
-// Mostriamo la stringa (parziale per sicurezza)
-echo "<h3>Stringa di connessione usata</h3>";
-echo "<pre>" . htmlspecialchars(str_replace($password, '[password nascosta]', $conn_string)) . "</pre>";
-
-// Tentiamo la connessione
-$conn = @pg_connect($conn_string);
-
-if ($conn) {
-    echo "<p style='color:green;'>✅ Connessione al database riuscita!</p>";
-    pg_close($conn);
-} else {
-    $lastError = pg_last_error() ?: 'Connessione non inizializzata o fallita.';
-    echo "<p style='color:red;'>❌ Connessione fallita.</p>";
-    echo "<h4>Dettaglio errore:</h4><pre>$lastError</pre>";
+if (!empty($missing)) {
+    echo '<p class="error">Mancano queste variabili nella DATABASE_URL:</p><ul>';
+    foreach ($missing as $var) {
+        echo '<li><code>' . html_escape($var) . '</code></li>';
+    }
+    echo '</ul>';
 }
 ?>
+
+<h2>Parametri estratti da DATABASE_URL</h2>
+<table>
+    <tr><th>Parametro</th><th>Valore</th></tr>
+    <tr><td>host</td><td><?= html_escape($host) ?></td></tr>
+    <tr><td>port</td><td><?= html_escape($port) ?></td></tr>
+    <tr><td>user</td><td><?= html_escape($user) ?></td></tr>
+    <tr><td>password</td><td>********</td></tr>
+    <tr><td>dbname</td><td><?= html_escape($dbname) ?></td></tr>
+</table>
+
+<?php
+$conn_string = "host=$host port=$port dbname=$dbname user=$user password=$password sslmode=require";
+?>
+
+<h2>Stringa di connessione usata</h2>
+<pre><?= html_escape($conn_string) ?></pre>
+
+<h2>Risultato</h2>
+<?php
+$conn = @pg_connect($conn_string);
+if ($conn):
+    echo '<p class="success">✅ Connessione al database riuscita!</p>';
+    pg_close($conn);
+else:
+    echo '<p class="error">❌ Connessione fallita:</p>';
+    echo '<pre>' . html_escape(pg_last_error() ?: 'Errore sconosciuto') . '</pre>';
+endif;
+?>
+</body>
+</html>
