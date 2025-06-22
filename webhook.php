@@ -1,143 +1,225 @@
 <?php
+declare(strict_types=1);
+header('Content-Type: application/json');
+
 require_once 'vendor/autoload.php';
 
-// 1. Recupero e validazione della DATABASE_URL
-$databaseUrl = getenv('DATABASE_URL');
-if (empty($databaseUrl)) {
-    error_log("[STRIPE_WEBHOOK] ERRORE: DATABASE_URL non configurata");
-    http_response_code(500);
-    exit(json_encode(['error' => 'Database configuration missing']));
-}
+/**
+ * Gestore Webhook Stripe con integrazione PostgreSQL
+ */
+class StripeWebhookProcessor {
+    private $dbConnection;
+    private $stripeClient;
+    private $webhookSecret;
 
-// 2. Parsing specializzato per Render.com
-$pattern = '/postgres:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/(.+)/';
-if (!preg_match($pattern, $databaseUrl, $matches)) {
-    error_log("[STRIPE_WEBHOOK] ERRORE: Formato DATABASE_URL non valido");
-    http_response_code(500);
-    exit(json_encode(['error' => 'Invalid database URL format']));
-}
+    public function __construct() {
+        $this->validateEnvironment();
+        $this->initializeStripe();
+        $this->dbConnection = $this->establishDbConnection();
+    }
 
-// 3. Estrazione componenti con URL decoding
-$user = $matches[1];
-$password = urldecode($matches[2]);
-$host = $matches[3];
-$port = $matches[4];
-$dbname = $matches[5];
+    /**
+     * Valida le variabili d'ambiente richieste
+     */
+    private function validateEnvironment(): void {
+        $requiredEnvVars = [
+            'DATABASE_URL',
+            'STRIPE_SECRET_KEY', 
+            'STRIPE_WEBHOOK_SECRET'
+        ];
 
-// 4. Stringa di connessione ottimizzata per Render.com
-$conn_string = sprintf(
-    "host=%s port=%s dbname=%s user=%s password=%s sslmode=require",
-    $host,
-    $port,
-    $dbname,
-    $user,
-    $password
-);
+        foreach ($requiredEnvVars as $var) {
+            if (empty(getenv($var))) {
+                $this->terminateWithError(500, "Variabile d'ambiente mancante: {$var}");
+            }
+        }
+    }
 
-// 5. Connessione con gestione avanzata degli errori
-$conn = @pg_connect($conn_string . " connect_timeout=5");
-if (!$conn) {
-    $error = pg_last_error();
-    error_log("[STRIPE_WEBHOOK] ERRORE CONNESSIONE: " . $error);
-    error_log("[STRIPE_WEBHOOK] DETTAGLI: Host=$host, Port=$port, DB=$dbname, User=$user");
-    http_response_code(500);
-    exit(json_encode([
-        'error' => 'Database connection failed',
-        'details' => $error,
-        'connection_info' => [
-            'host' => $host,
-            'port' => $port,
-            'database' => $dbname,
-            'user' => $user
-        ]
-    ]));
-}
+    /**
+     * Inizializza il client Stripe
+     */
+    private function initializeStripe(): void {
+        $this->stripeClient = new \Stripe\StripeClient(getenv('STRIPE_SECRET_KEY'));
+        $this->webhookSecret = getenv('STRIPE_WEBHOOK_SECRET');
+    }
 
-// 6. Configurazioni post-connessione
-pg_set_client_encoding($conn, 'UTF-8');
-pg_query($conn, "SET TIME ZONE 'UTC'");
+    /**
+     * Stabilisce la connessione al database PostgreSQL
+     */
+    private function establishDbConnection() {
+        $dbUrl = getenv('DATABASE_URL');
+        $dbConfig = parse_url($dbUrl);
 
-// Verifica finale
-if (pg_connection_status($conn) !== PGSQL_CONNECTION_OK) {
-    error_log("[STRIPE_WEBHOOK] ERRORE: Connessione instabile");
-    http_response_code(500);
-    exit(json_encode(['error' => 'Unstable database connection']));
-}
+        if (!$dbConfig) {
+            $this->terminateWithError(500, "Configurazione database non valida");
+        }
 
-// Impostiamo il client encoding a UTF-8 per evitare problemi con i caratteri speciali
-pg_set_client_encoding($conn, 'UTF-8');
+        $connectionString = sprintf(
+            "host=%s port=%s dbname=%s user=%s password=%s sslmode=require",
+            $dbConfig['host'],
+            $dbConfig['port'] ?? '5432',
+            ltrim($dbConfig['path'] ?? '', '/'),
+            $dbConfig['user'] ?? '',
+            $dbConfig['pass'] ?? ''
+        );
 
+        $conn = pg_connect($connectionString . " connect_timeout=5");
+        
+        if (!$conn) {
+            $this->terminateWithError(500, "Connessione database fallita: " . pg_last_error());
+        }
 
-// Configura la chiave segreta di Stripe
-\Stripe\Stripe::setApiKey(getenv('STRIPE_SECRET_KEY'));
+        // Configurazioni post-connessione
+        pg_set_client_encoding($conn, 'UTF-8');
+        pg_query($conn, "SET TIME ZONE 'UTC'");
 
-// Elabora il webhook
-$payload = @file_get_contents('php://input');
-$sig_header = $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '';
-$endpoint_secret = getenv('STRIPE_WEBHOOK_SECRET');
+        return $conn;
+    }
 
-try {
-    // Verifica la firma del webhook
-    $event = \Stripe\Webhook::constructEvent($payload, $sig_header, $endpoint_secret);
-} catch(Exception $e) {
-    error_log("[STRIPE_WEBHOOK] Errore verifica webhook: " . $e->getMessage());
-    http_response_code(400);
-    exit;
-}
+    /**
+     * Elabora la richiesta webhook
+     */
+    public function processWebhook(): void {
+        try {
+            $event = $this->verifyWebhookSignature();
+            $this->handleStripeEvent($event);
+        } catch (\Throwable $e) {
+            $this->handleProcessingError($e);
+        } finally {
+            $this->cleanupResources();
+        }
+    }
 
-// Estrai i dati dal payload
-$payment_data = $event->data->object;
+    /**
+     * Verifica la firma del webhook Stripe
+     */
+    private function verifyWebhookSignature(): \Stripe\Event {
+        $payload = @file_get_contents('php://input');
+        $signature = $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '';
 
-// Verifica i campi obbligatori
-$campi_obbligatori = ['id', 'amount', 'currency', 'status'];
-foreach ($campi_obbligatori as $campo) {
-    if (!isset($payment_data->$campo)) {
-        error_log("[STRIPE_WEBHOOK] Manca campo obbligatorio: $campo");
-        http_response_code(400);
+        if (empty($payload) || empty($signature)) {
+            throw new RuntimeException("Dati webhook incompleti");
+        }
+
+        try {
+            return \Stripe\Webhook::constructEvent(
+                $payload,
+                $signature,
+                $this->webhookSecret
+            );
+        } catch (\Stripe\Exception\SignatureVerificationException $e) {
+            throw new RuntimeException("Verifica firma fallita: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Gestisce l'evento Stripe
+     */
+    private function handleStripeEvent(\Stripe\Event $event): void {
+        if ($event->type !== 'payment_intent.succeeded') {
+            throw new RuntimeException("Tipo evento non supportato: {$event->type}");
+        }
+
+        $payment = $event->data->object;
+        $this->validatePaymentData($payment);
+        $this->storePaymentRecord($payment);
+        
+        $this->sendSuccessResponse($payment->id);
+    }
+
+    /**
+     * Valida i dati del pagamento
+     */
+    private function validatePaymentData(\Stripe\PaymentIntent $payment): void {
+        $requiredFields = [
+            'id', 'amount', 'currency', 
+            'status', 'created'
+        ];
+
+        foreach ($requiredFields as $field) {
+            if (!isset($payment->$field)) {
+                throw new RuntimeException("Campo mancante: {$field}");
+            }
+        }
+    }
+
+    /**
+     * Registra il pagamento nel database
+     */
+    private function storePaymentRecord(\Stripe\PaymentIntent $payment): void {
+        pg_query($this->dbConnection, "BEGIN");
+
+        $result = pg_query_params(
+            $this->dbConnection,
+            "INSERT INTO stripe_transactions (
+                stripe_payment_id, amount, currency, status,
+                customer_id, payment_method, receipt_email,
+                stripe_created_at, raw_event
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+            [
+                $payment->id,
+                $payment->amount / 100,
+                strtoupper($payment->currency),
+                $payment->status,
+                $payment->customer ?? null,
+                $payment->payment_method ?? null,
+                $payment->receipt_email ?? null,
+                date('Y-m-d H:i:s', $payment->created),
+                json_encode($payment)
+            ]
+        );
+
+        if (!$result) {
+            pg_query($this->dbConnection, "ROLLBACK");
+            throw new RuntimeException("Errore database: " . pg_last_error($this->dbConnection));
+        }
+
+        pg_query($this->dbConnection, "COMMIT");
+    }
+
+    /**
+     * Gestione degli errori
+     */
+    private function handleProcessingError(\Throwable $e): void {
+        $statusCode = $e instanceof RuntimeException ? 400 : 500;
+        $this->terminateWithError($statusCode, $e->getMessage());
+    }
+
+    /**
+     * Invia risposta di successo
+     */
+    private function sendSuccessResponse(string $paymentId): void {
+        http_response_code(200);
+        echo json_encode([
+            'status' => 'success',
+            'payment_id' => $paymentId,
+            'timestamp' => date('c')
+        ]);
+    }
+
+    /**
+     * Termina con errore
+     */
+    private function terminateWithError(int $code, string $message): void {
+        http_response_code($code);
+        echo json_encode([
+            'status' => 'error',
+            'message' => $message,
+            'timestamp' => date('c')
+        ]);
         exit;
+    }
+
+    /**
+     * Pulizia delle risorse
+     */
+    private function cleanupResources(): void {
+        if ($this->dbConnection) {
+            pg_close($this->dbConnection);
+        }
     }
 }
 
-// Prepara i dati per il database
-$dati_db = [
-    'stripe_id' => $payment_data->id,
-    'amount'    => $payment_data->amount,
-    'currency'  => $payment_data->currency,
-    'status'    => $payment_data->status,
-    'customer'  => $payment_data->customer ?? null,
-    'method'    => $payment_data->payment_method ?? null,
-    'email'     => $payment_data->receipt_email ?? null,
-    'created'   => isset($payment_data->created) ? date('Y-m-d H:i:s', $payment_data->created) : null,
-    'raw_data'  => json_encode($payment_data)
-];
-
-// Query per inserire i dati
-$query = "INSERT INTO stripe_transactions (
-    stripe_payment_id, amount, currency, status, customer_id,
-    payment_method, receipt_email, stripe_created_at, raw_event
-) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9
-)";
-
-$result = pg_query_params($conn, $query, [
-    $dati_db['stripe_id'],
-    $dati_db['amount'],
-    $dati_db['currency'],
-    $dati_db['status'],
-    $dati_db['customer'],
-    $dati_db['method'],
-    $dati_db['email'],
-    $dati_db['created'],
-    $dati_db['raw_data']
-]);
-
-if (!$result) {
-    error_log("[STRIPE_WEBHOOK] Errore inserimento database: " . pg_last_error($conn));
-    http_response_code(500);
-} else {
-    http_response_code(200);
-    error_log("[STRIPE_WEBHOOK] Pagamento {$payment_data->id} registrato con successo");
-}
-
-pg_close($conn);
+// Esecuzione principale
+(new StripeWebhookProcessor())->processWebhook();
 ?>
