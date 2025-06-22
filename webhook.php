@@ -1,55 +1,80 @@
 <?php
-// Configurazione
-$host = "dpg-d19h6lfgi27c73crpsrg-a.oregon-postgres.render.com";
-$port = "5432";
-$dbname = "stripe_test_ase0";
-$user = "stripe_test_ase0_user";
-$password = "0zMaW0fLMN9N8XCgHJqQZ7gevMesVeCZ";
+require 'vendor/autoload.php'; // Composer: stripe/stripe-php
 
-// Connessione
-$conn = pg_connect("host=$host port=$port dbname=$dbname user=$user password=$password sslmode=require");
+// Recupero variabili d’ambiente (fornite via Render Dashboard)
+$databaseUrl = getenv('DATABASE_URL');
+$webhookSecret = getenv('STRIPE_WEBHOOK_SECRET');
+$logFile = getenv('LOG_FILE') ?: './logs/stripe_webhook.log';
 
+// Parse della DATABASE_URL
+$dbParts = parse_url($databaseUrl);
+$dbHost = $dbParts['host'];
+$dbPort = $dbParts['port'];
+$dbUser = $dbParts['user'];
+$dbPass = $dbParts['pass'];
+$dbName = ltrim($dbParts['path'], '/');
+
+// Connessione al database PostgreSQL
+$conn = pg_connect("host=$dbHost port=$dbPort dbname=$dbName user=$dbUser password=$dbPass sslmode=require");
 if (!$conn) {
+    error_log("DB connection failed\n", 3, $logFile);
     http_response_code(500);
     exit;
 }
 
-// Leggo il payload JSON inviato da Stripe (webhook)
+// Ricezione payload Stripe
 $input = file_get_contents('php://input');
-$data = json_decode($input, true);
+$sig_header = $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '';
 
-// Controllo base che il JSON sia valido
-if (!$data) {
-    http_response_code(400); // Bad Request
+try {
+    $event = \Stripe\Webhook::constructEvent($input, $sig_header, $webhookSecret);
+} catch (\UnexpectedValueException $e) {
+    error_log("Invalid payload: " . $e->getMessage() . "\n", 3, $logFile);
+    http_response_code(400);
     exit;
-}
-
-// Estrazione dei campi (adatta in base al payload Stripe che ti interessa)
-$stripe_payment_id = $data['data']['object']['id'] ?? null;
-$amount = $data['data']['object']['amount'] ?? null;
-$currency = $data['data']['object']['currency'] ?? null;
-$status = $data['data']['object']['status'] ?? null;
-$customer_id = $data['data']['object']['customer'] ?? null;
-$payment_method = $data['data']['object']['payment_method'] ?? null;
-$receipt_email = $data['data']['object']['receipt_email'] ?? null;
-$stripe_created_at = isset($data['data']['object']['created']) ? date('Y-m-d H:i:s', $data['data']['object']['created']) : null;
-$raw_event = json_encode($data);
-
-// Verifica campi essenziali
-if (!$stripe_payment_id || !$amount || !$currency || !$status) {
+} catch (\Stripe\Exception\SignatureVerificationException $e) {
+    error_log("Invalid signature: " . $e->getMessage() . "\n", 3, $logFile);
     http_response_code(400);
     exit;
 }
 
-// Query di inserimento (uso pg_query_params per sicurezza)
-$query = "INSERT INTO stripe_transactions (
+// Estrazione dati dal payload verificato
+$data = $event->data->object;
+
+$stripe_payment_id = $data->id ?? null;
+$amount = $data->amount ?? null;
+$currency = $data->currency ?? null;
+$status = $data->status ?? null;
+$customer_id = $data->customer ?? null;
+$payment_method = $data->payment_method ?? null;
+$receipt_email = $data->receipt_email ?? null;
+$stripe_created_at = isset($data->created) ? date('Y-m-d H:i:s', $data->created) : null;
+$raw_event = json_encode($event);
+
+// Controllo dati essenziali
+if (!$stripe_payment_id || !$amount || !$currency || !$status) {
+    error_log("Missing essential fields\n", 3, $logFile);
+    http_response_code(400);
+    exit;
+}
+
+// Verifica se l'evento è già stato registrato (evita duplicati)
+$check_query = "SELECT 1 FROM stripe_transactions WHERE stripe_payment_id = $1 LIMIT 1";
+$check_result = pg_query_params($conn, $check_query, [$stripe_payment_id]);
+if (pg_num_rows($check_result) > 0) {
+    http_response_code(200); // Già presente, ma tutto OK
+    exit;
+}
+
+// Inserimento dati
+$insert_query = "INSERT INTO stripe_transactions (
     stripe_payment_id, amount, currency, status, customer_id,
     payment_method, receipt_email, stripe_created_at, raw_event
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9
 )";
 
-$result = pg_query_params($conn, $query, [
+$insert_result = pg_query_params($conn, $insert_query, [
     $stripe_payment_id,
     $amount,
     $currency,
@@ -61,11 +86,14 @@ $result = pg_query_params($conn, $query, [
     $raw_event
 ]);
 
-if ($result) {
+if ($insert_result) {
     http_response_code(200);
 } else {
+    error_log("DB insert failed: " . pg_last_error($conn) . "\n", 3, $logFile);
     http_response_code(500);
 }
 
 pg_close($conn);
+
+
 ?>
