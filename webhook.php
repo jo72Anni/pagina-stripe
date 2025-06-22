@@ -1,48 +1,30 @@
 <?php
-// Carica la libreria Stripe (assicurati di aver installato con: composer require stripe/stripe-php)
 require_once 'vendor/autoload.php';
 
-// Ottieni DATABASE_URL dalle variabili d'ambiente con fallback a un valore predefinito se necessario
+// 1. Recupero e validazione della DATABASE_URL
 $databaseUrl = getenv('DATABASE_URL');
-
 if (empty($databaseUrl)) {
-    error_log("[STRIPE_WEBHOOK] ERRORE: Variabile DATABASE_URL non trovata o vuota");
+    error_log("[STRIPE_WEBHOOK] ERRORE: DATABASE_URL non configurata");
     http_response_code(500);
-    exit(json_encode(['error' => 'Configurazione database mancante']));
+    exit(json_encode(['error' => 'Database configuration missing']));
 }
 
-// Parsing della URL per estrarre i componenti con gestione degli errori
-$dbOptions = parse_url($databaseUrl);
-if ($dbOptions === false) {
-    error_log("[STRIPE_WEBHOOK] ERRORE: Parsing DATABASE_URL fallito - URL malformata");
+// 2. Parsing specializzato per Render.com
+$pattern = '/postgres:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/(.+)/';
+if (!preg_match($pattern, $databaseUrl, $matches)) {
+    error_log("[STRIPE_WEBHOOK] ERRORE: Formato DATABASE_URL non valido");
     http_response_code(500);
-    exit(json_encode(['error' => 'Configurazione database non valida']));
+    exit(json_encode(['error' => 'Invalid database URL format']));
 }
 
-// Estrazione e validazione dei parametri
-$host = $dbOptions['host'] ?? null;
-$port = $dbOptions['port'] ?? '5432'; // Default PostgreSQL port
-$dbName = isset($dbOptions['path']) ? trim($dbOptions['path'], '/') : null;
-$user = $dbOptions['user'] ?? null;
-$password = isset($dbOptions['pass']) ? urldecode($dbOptions['pass']) : null;
+// 3. Estrazione componenti con URL decoding
+$user = $matches[1];
+$password = urldecode($matches[2]);
+$host = $matches[3];
+$port = $matches[4];
+$dbname = $matches[5];
 
-// Verifica che tutti i componenti obbligatori siano presenti
-$missingParams = [];
-if (empty($host)) $missingParams[] = 'host';
-if (empty($dbName)) $missingParams[] = 'dbname';
-if (empty($user)) $missingParams[] = 'user';
-if (empty($password)) $missingParams[] = 'password';
-
-if (!empty($missingParams)) {
-    error_log("[STRIPE_WEBHOOK] ERRORE: DATABASE_URL incompleta - Parametri mancanti: " . implode(', ', $missingParams));
-    http_response_code(500);
-    exit(json_encode(['error' => 'Configurazione database incompleta']));
-}
-
-// Correzione: c'era una discrepanza tra $dbName (maiuscolo) e $dbname (minuscolo)
-$dbname = $dbName; // Uniformiamo le variabili
-
-// Costruzione della stringa di connessione con parametri aggiuntivi per Render.com
+// 4. Stringa di connessione ottimizzata per Render.com
 $conn_string = sprintf(
     "host=%s port=%s dbname=%s user=%s password=%s sslmode=require",
     $host,
@@ -52,18 +34,34 @@ $conn_string = sprintf(
     $password
 );
 
-// Tentativo di connessione con timeout
-$conn = pg_connect($conn_string . " connect_timeout=5");
-
+// 5. Connessione con gestione avanzata degli errori
+$conn = @pg_connect($conn_string . " connect_timeout=5");
 if (!$conn) {
-    $errorMsg = pg_last_error();
-    error_log("[STRIPE_WEBHOOK] ERRORE CONNESSIONE DB: " . $errorMsg);
-    error_log("[STRIPE_WEBHOOK] Stringa connessione: " . str_replace($password, '*****', $conn_string));
+    $error = pg_last_error();
+    error_log("[STRIPE_WEBHOOK] ERRORE CONNESSIONE: " . $error);
+    error_log("[STRIPE_WEBHOOK] DETTAGLI: Host=$host, Port=$port, DB=$dbname, User=$user");
     http_response_code(500);
     exit(json_encode([
         'error' => 'Database connection failed',
-        'details' => $errorMsg
+        'details' => $error,
+        'connection_info' => [
+            'host' => $host,
+            'port' => $port,
+            'database' => $dbname,
+            'user' => $user
+        ]
     ]));
+}
+
+// 6. Configurazioni post-connessione
+pg_set_client_encoding($conn, 'UTF-8');
+pg_query($conn, "SET TIME ZONE 'UTC'");
+
+// Verifica finale
+if (pg_connection_status($conn) !== PGSQL_CONNECTION_OK) {
+    error_log("[STRIPE_WEBHOOK] ERRORE: Connessione instabile");
+    http_response_code(500);
+    exit(json_encode(['error' => 'Unstable database connection']));
 }
 
 // Impostiamo il client encoding a UTF-8 per evitare problemi con i caratteri speciali
