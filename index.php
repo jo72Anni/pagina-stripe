@@ -1,12 +1,12 @@
 <?php
 // ==============================================
-// BACKEND PHP (eseguito sul server)
+// TEST DI CONNESSIONE POSTGRESQL (Versione Semplificata)
 // ==============================================
-$db_connected = false;
-$db_error = "";
-$db_result = null;
 
-// Configurazione del database (modifica con i tuoi dati Render)
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+// Configurazione del database Render
 $db_config = [
     'host' => 'dpg-d257e563jp1c73e216h0-a.oregon-postgres.render.com',
     'port' => 5432,
@@ -16,7 +16,10 @@ $db_config = [
     'ssl_mode' => 'require'
 ];
 
-// Tentativo di connessione quando si invia il form
+$connection_status = '';
+$query_result = '';
+
+// Tentativo di connessione
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $connection_string = sprintf(
@@ -29,31 +32,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db_config['ssl_mode']
         );
 
-        $db_conn = pg_connect($connection_string);
+        $conn = pg_connect($connection_string);
         
-        if ($db_conn) {
-            $db_connected = true;
-            $result = pg_query($db_conn, "SELECT NOW() AS current_time, version() AS pg_version");
-            $db_result = pg_fetch_assoc($result);
-            pg_close($db_conn);
+        if ($conn) {
+            $connection_status = "✅ Connessione riuscita!";
+            
+            // Esegui una query di test
+            $result = pg_query($conn, "SELECT NOW() as current_time, version() as pg_version");
+            if ($result) {
+                $query_result = pg_fetch_assoc($result);
+            }
+            pg_close($conn);
         } else {
-            $db_error = "Connessione fallita senza errori specifici";
+            $connection_status = "❌ Connessione fallita";
         }
     } catch (Exception $e) {
-        $db_error = $e->getMessage();
+        $connection_status = "❌ Errore: " . $e->getMessage();
     }
 }
 ?>
 
-<!-- ============================================== -->
-<!-- FRONTEND HTML -->
-<!-- ============================================== -->
 <!DOCTYPE html>
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Test Connessione PostgreSQL</title>
+    <title>Test PostgreSQL con PHP</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -62,8 +65,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             padding: 20px;
             line-height: 1.6;
         }
+        .container {
+            background: #f9f9f9;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
         h1 {
             color: #6772e5;
+            text-align: center;
         }
         button {
             background: #6772e5;
@@ -74,84 +84,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cursor: pointer;
             font-size: 16px;
         }
-        button:hover {
-            background: #5469d4;
-        }
-        .result {
-            margin-top: 20px;
+        .success {
+            color: #2e7d32;
+            background: #e8f5e9;
             padding: 15px;
             border-radius: 4px;
-        }
-        .success {
-            background: #e6f7e6;
-            border: 1px solid #4CAF50;
-            color: #2d572c;
         }
         .error {
+            color: #c62828;
             background: #ffebee;
-            border: 1px solid #f44336;
-            color: #d32f2f;
-        }
-        .config {
-            background: #f0f0f0;
             padding: 15px;
             border-radius: 4px;
-            margin-bottom: 20px;
-            font-family: monospace;
         }
         pre {
-            background: #f8f8f8;
-            padding: 10px;
+            background: #f5f5f5;
+            padding: 15px;
             border-radius: 4px;
             overflow-x: auto;
         }
     </style>
 </head>
 <body>
-    <h1>Test Connessione PostgreSQL</h1>
-    
-    <div class="config">
-        <h3>Configurazione Database</h3>
-        <pre><?= htmlspecialchars(json_encode($db_config, JSON_PRETTY_PRINT)) ?></pre>
-    </div>
-
-    <form method="POST">
-        <button type="submit">Testa Connessione</button>
-    </form>
-
-    <div class="result <?= $db_connected ? 'success' : 'error' ?>">
+    <div class="container">
+        <h1>Test Connessione PostgreSQL</h1>
+        
+        <form method="POST">
+            <button type="submit">Testa Connessione</button>
+        </form>
+        
         <?php if ($_SERVER['REQUEST_METHOD'] === 'POST'): ?>
-            <?php if ($db_connected): ?>
-                <h3>✅ Connessione Riuscita!</h3>
-                <pre><?= htmlspecialchars(json_encode($db_result, JSON_PRETTY_PRINT)) ?></pre>
-                <p>Ora corrente nel database: <strong><?= $db_result['current_time'] ?></strong></p>
-                <p>Versione PostgreSQL: <strong><?= $db_result['pg_version'] ?></strong></p>
-            <?php else: ?>
-                <h3>❌ Errore di Connessione</h3>
-                <p><?= htmlspecialchars($db_error) ?></p>
-                <h4>Problemi comuni:</h4>
-                <ul>
-                    <li>Credenziali errate</li>
-                    <li>Server PostgreSQL non raggiungibile</li>
-                    <li>Mancanza dell'estensione <code>pgsql</code> in PHP</li>
-                    <li>Problemi di SSL (Render richiede connessioni sicure)</li>
-                </ul>
-            <?php endif; ?>
+            <div class="<?= strpos($connection_status, '✅') !== false ? 'success' : 'error' ?>">
+                <h3><?= $connection_status ?></h3>
+                
+                <?php if ($query_result): ?>
+                    <h4>Risultato Query:</h4>
+                    <pre><?= print_r($query_result, true) ?></pre>
+                <?php endif; ?>
+            </div>
+            
+            <h3>Dettagli Configurazione:</h3>
+            <pre><?= print_r($db_config, true) ?></pre>
         <?php else: ?>
-            <p>Clicca il pulsante per testare la connessione al database</p>
+            <p>Clicca il pulsante per testare la connessione al database PostgreSQL su Render</p>
         <?php endif; ?>
+        
+        <h3>Requisiti PHP:</h3>
+        <ul>
+            <li>Estensione <code>pgsql</code> abilitata</li>
+            <li>Connessione in uscita alla porta 5432</li>
+            <li>Supporto SSL (richiesto da Render)</li>
+        </ul>
     </div>
-
-    <h2>Requisiti PHP</h2>
-    <p>Per far funzionare questo script, il tuo server PHP deve avere:</p>
-    <ul>
-        <li>Estensione <code>pgsql</code> abilitata</li>
-        <li>Connessione in uscita verso <code>dpg-d257e563jp1c73e216h0-a.oregon-postgres.render.com:5432</code></li>
-    </ul>
-
-    <h2>Come verificare l'estensione pgsql</h2>
-    <p>Crea un file <code>phpinfo.php</code> con:</p>
-    <pre><?= htmlspecialchars('<?php phpinfo(); ?>') ?></pre>
-    <p>Cerca "pgsql" nella pagina risultante. Se non è presente, abilitala nel php.ini.</p>
 </body>
 </html>
