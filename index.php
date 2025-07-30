@@ -118,7 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </head>
 <body>
     <div class="container">
-        <h1>Test Connessione PostgreSQL (Env)</h1>
+        <h1>Test Connessione 2 PostgreSQL (Env)</h1>
         
         <form method="POST">
             <button type="submit">Testa Connessione</button>
