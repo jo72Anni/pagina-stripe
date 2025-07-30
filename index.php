@@ -1,19 +1,24 @@
 <?php
 // ==============================================
-// TEST DI CONNESSIONE POSTGRESQL (Versione Semplificata)
+// TEST DI CONNESSIONE POSTGRESQL (Versione con Env)
 // ==============================================
 
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
-// Configurazione del database Render
+// Carica le variabili d'ambiente
+require_once __DIR__ . '/vendor/autoload.php'; // Se usi vlucas/phpdotenv
+$dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
+$dotenv->load();
+
+// Configurazione del database da variabili d'ambiente
 $db_config = [
-    'host' => 'dpg-d257e563jp1c73e216h0-a.oregon-postgres.render.com',
-    'port' => 5432,
-    'dbname' => 'dbstripe_ul7f',
-    'user' => 'dbstripe_ul7f_user',
-    'password' => 'j7rP4lHTCdjmlVNIRouEhlJLiX8LiZue',
-    'ssl_mode' => 'require'
+    'host' => $_ENV['DB_HOST'] ?? getenv('DB_HOST'),
+    'port' => $_ENV['DB_PORT'] ?? getenv('DB_PORT') ?? 5432,
+    'dbname' => $_ENV['DB_NAME'] ?? getenv('DB_NAME'),
+    'user' => $_ENV['DB_USER'] ?? getenv('DB_USER'),
+    'password' => $_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD'),
+    'ssl_mode' => $_ENV['DB_SSL_MODE'] ?? getenv('DB_SSL_MODE') ?? 'require'
 ];
 
 $connection_status = '';
@@ -56,7 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <title>Test PostgreSQL con PHP</title>
+    <title>Test PostgreSQL con PHP (Env)</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -102,11 +107,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             border-radius: 4px;
             overflow-x: auto;
         }
+        .warning {
+            color: #ff8f00;
+            background: #fff3e0;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 20px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Test Connessione PostgreSQL</h1>
+        <h1>Test Connessione PostgreSQL (Env)</h1>
         
         <form method="POST">
             <button type="submit">Testa Connessione</button>
@@ -125,14 +137,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <h3>Dettagli Configurazione:</h3>
             <pre><?= print_r($db_config, true) ?></pre>
         <?php else: ?>
-            <p>Clicca il pulsante per testare la connessione al database PostgreSQL su Render</p>
+            <p>Clicca il pulsante per testare la connessione al database PostgreSQL</p>
         <?php endif; ?>
+        
+        <div class="warning">
+            <h3>Nota sulla sicurezza:</h3>
+            <p>Questa versione utilizza variabili d'ambiente per le credenziali del database. Assicurati di:</p>
+            <ul>
+                <li>Avere un file <code>.env</code> nella root del progetto (escluso dal version control)</li>
+                <li>Avere configurato le variabili d'ambiente nel tuo hosting</li>
+                <li>Non esporre mai le credenziali nel codice sorgente</li>
+            </ul>
+        </div>
         
         <h3>Requisiti PHP:</h3>
         <ul>
             <li>Estensione <code>pgsql</code> abilitata</li>
             <li>Connessione in uscita alla porta 5432</li>
             <li>Supporto SSL (richiesto da Render)</li>
+            <li>Pacchetto <code>vlucas/phpdotenv</code> installato (se usi file .env localmente)</li>
         </ul>
     </div>
 </body>
