@@ -1,59 +1,89 @@
 <?php
-// ==============================================
-// TEST DI CONNESSIONE POSTGRESQL (Versione con Env)
-// ==============================================
+// config.php (protetto)
+define('DB_CONFIG', [
+    'host'     => getenv('DB_HOST'),
+    'port'     => getenv('DB_PORT') ?: 5432,
+    'dbname'   => getenv('DB_NAME'),
+    'user'     => getenv('DB_USER'),
+    'password' => getenv('DB_PASSWORD'),
+    'ssl_mode' => 'require'
+]);
+?>
 
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
+<?php
+// index.php
+require_once 'config.php';
 
-// Carica le variabili d'ambiente
-require_once __DIR__ . '/vendor/autoload.php'; // Se usi vlucas/phpdotenv
-$dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
-$dotenv->load();
+// Funzioni Database
+function getConnection() {
+    $dsn = sprintf("pgsql:host=%s;port=%d;dbname=%s", 
+        DB_CONFIG['host'], 
+        DB_CONFIG['port'], 
+        DB_CONFIG['dbname']);
+    
+    return new PDO($dsn, DB_CONFIG['user'], DB_CONFIG['password'], [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+    ]);
+}
 
-// Configurazione del database da variabili d'ambiente
-$db_config = [
-    'host' => $_ENV['DB_HOST'] ?? getenv('DB_HOST'),
-    'port' => $_ENV['DB_PORT'] ?? getenv('DB_PORT') ?? 5432,
-    'dbname' => $_ENV['DB_NAME'] ?? getenv('DB_NAME'),
-    'user' => $_ENV['DB_USER'] ?? getenv('DB_USER'),
-    'password' => $_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD'),
-    'ssl_mode' => $_ENV['DB_SSL_MODE'] ?? getenv('DB_SSL_MODE') ?? 'require'
-];
+// Azioni
+$action = $_POST['action'] ?? '';
+$response = [];
 
-$connection_status = '';
-$query_result = '';
-
-// Tentativo di connessione
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    try {
-        $connection_string = sprintf(
-            "host=%s port=%d dbname=%s user=%s password=%s sslmode=%s",
-            $db_config['host'],
-            $db_config['port'],
-            $db_config['dbname'],
-            $db_config['user'],
-            $db_config['password'],
-            $db_config['ssl_mode']
-        );
-
-        $conn = pg_connect($connection_string);
-        
-        if ($conn) {
-            $connection_status = "✅ Connessione riuscita!";
+try {
+    $pdo = getConnection();
+    
+    switch($action) {
+        case 'test_connection':
+            $response = ['status' => 'success', 'data' => $pdo->query("SELECT NOW() AS time")->fetch()];
+            break;
             
-            // Esegui una query di test
-            $result = pg_query($conn, "SELECT NOW() as current_time, version() as pg_version");
-            if ($result) {
-                $query_result = pg_fetch_assoc($result);
-            }
-            pg_close($conn);
-        } else {
-            $connection_status = "❌ Connessione fallita";
-        }
-    } catch (Exception $e) {
-        $connection_status = "❌ Errore: " . $e->getMessage();
+        case 'get_tables':
+            $tables = $pdo->query("SELECT table_name FROM information_schema.tables WHERE table_schema='public'")->fetchAll(PDO::FETCH_COLUMN);
+            $response = ['status' => 'success', 'data' => $tables];
+            break;
+            
+        case 'get_table_data':
+            $table = $_POST['table'];
+            $page = $_POST['page'] ?? 1;
+            $limit = 20;
+            $offset = ($page - 1) * $limit;
+            
+            $stmt = $pdo->prepare("SELECT * FROM $table LIMIT ? OFFSET ?");
+            $stmt->execute([$limit, $offset]);
+            $response = [
+                'status' => 'success',
+                'data' => $stmt->fetchAll(),
+                'columns' => array_keys($stmt->fetch(PDO::FETCH_ASSOC) ?: [])
+            ];
+            break;
+            
+        case 'insert_test_data':
+            // Dati fittizi Stripe
+            $testData = [
+                'payment_intent.succeeded' => [
+                    'id' => 'pi_'.uniqid(),
+                    'amount' => rand(1000, 10000),
+                    'currency' => 'usd',
+                    'status' => 'succeeded'
+                ],
+                // Altri eventi...
+            ];
+            
+            // Insert nel DB...
+            $response = ['status' => 'success', 'inserted' => count($testData)];
+            break;
     }
+    
+} catch (PDOException $e) {
+    $response = ['status' => 'error', 'message' => $e->getMessage()];
+}
+
+if ($action) {
+    header('Content-Type: application/json');
+    echo json_encode($response);
+    exit;
 }
 ?>
 
@@ -61,102 +91,177 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <title>Test PostgreSQL con PHP (Env)</title>
+    <title>PostgreSQL Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css">
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            line-height: 1.6;
+        .dashboard-card {
+            transition: all 0.3s;
         }
-        .container {
-            background: #f9f9f9;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        .dashboard-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
         }
-        h1 {
-            color: #6772e5;
-            text-align: center;
-        }
-        button {
-            background: #6772e5;
-            color: white;
-            border: none;
-            padding: 10px 15px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
-        }
-        .success {
-            color: #2e7d32;
-            background: #e8f5e9;
-            padding: 15px;
-            border-radius: 4px;
-        }
-        .error {
-            color: #c62828;
-            background: #ffebee;
-            padding: 15px;
-            border-radius: 4px;
-        }
-        pre {
-            background: #f5f5f5;
-            padding: 15px;
-            border-radius: 4px;
-            overflow-x: auto;
-        }
-        .warning {
-            color: #ff8f00;
-            background: #fff3e0;
-            padding: 15px;
-            border-radius: 4px;
-            margin-top: 20px;
+        .table-container {
+            max-height: 70vh;
+            overflow-y: auto;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Test Connessione PostgreSQL (Env)</h1>
-        
-        <form method="POST">
-            <button type="submit">Testa Connessione</button>
-        </form>
-        
-        <?php if ($_SERVER['REQUEST_METHOD'] === 'POST'): ?>
-            <div class="<?= strpos($connection_status, '✅') !== false ? 'success' : 'error' ?>">
-                <h3><?= $connection_status ?></h3>
-                
-                <?php if ($query_result): ?>
-                    <h4>Risultato Query:</h4>
-                    <pre><?= print_r($query_result, true) ?></pre>
-                <?php endif; ?>
+    <div class="container-fluid py-4">
+        <div class="row mb-4">
+            <div class="col">
+                <h1 class="display-4">PostgreSQL Admin</h1>
+                <p class="lead">Gestione database Stripe</p>
             </div>
-            
-            <h3>Dettagli Configurazione:</h3>
-            <pre><?= print_r($db_config, true) ?></pre>
-        <?php else: ?>
-            <p>Clicca il pulsante per testare la connessione al database PostgreSQL</p>
-        <?php endif; ?>
-        
-        <div class="warning">
-            <h3>Nota sulla sicurezza:</h3>
-            <p>Questa versione utilizza variabili d'ambiente per le credenziali del database. Assicurati di:</p>
-            <ul>
-                <li>Avere un file <code>.env</code> nella root del progetto (escluso dal version control)</li>
-                <li>Avere configurato le variabili d'ambiente nel tuo hosting</li>
-                <li>Non esporre mai le credenziali nel codice sorgente</li>
-            </ul>
         </div>
         
-        <h3>Requisiti PHP:</h3>
-        <ul>
-            <li>Estensione <code>pgsql</code> abilitata</li>
-            <li>Connessione in uscita alla porta 5432</li>
-            <li>Supporto SSL (richiesto da Render)</li>
-            <li>Pacchetto <code>vlucas/phpdotenv</code> installato (se usi file .env localmente)</li>
-        </ul>
+        <!-- Dashboard Cards -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card dashboard-card bg-primary text-white">
+                    <div class="card-body">
+                        <h5 class="card-title">Test Connessione</h5>
+                        <button id="testBtn" class="btn btn-light">Esegui Test</button>
+                        <div id="testResult" class="mt-2"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="card dashboard-card bg-success text-white">
+                    <div class="card-body">
+                        <h5 class="card-title">Dati Fittizi</h5>
+                        <button id="mockDataBtn" class="btn btn-light">Genera Dati Stripe</button>
+                        <div id="mockDataResult" class="mt-2"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="card dashboard-card bg-info text-white">
+                    <div class="card-body">
+                        <h5 class="card-title">Stato Database</h5>
+                        <div id="dbStatus">Non testato</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Tabella Dati -->
+        <div class="card">
+            <div class="card-header">
+                <div class="row">
+                    <div class="col-md-6">
+                        <select id="tableSelect" class="form-select">
+                            <option value="">Seleziona una tabella</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6 text-end">
+                        <div class="btn-group">
+                            <button id="refreshBtn" class="btn btn-sm btn-outline-secondary">
+                                <i class="bi bi-arrow-clockwise"></i> Aggiorna
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="table-container">
+                <table id="dataTable" class="table table-striped" style="width:100%">
+                    <thead></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            
+            <div class="card-footer">
+                <nav>
+                    <ul class="pagination justify-content-center" id="pagination">
+                    </ul>
+                </nav>
+            </div>
+        </div>
     </div>
+
+    <!-- Scripts -->
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
+    <script>
+    $(document).ready(function() {
+        // Test connessione
+        $('#testBtn').click(function() {
+            $.post('', {action: 'test_connection'}, function(res) {
+                const html = res.status === 'success' 
+                    ? `<span class="badge bg-success">Connesso</span><br>${res.data.time}`
+                    : `<span class="badge bg-danger">Errore</span><br>${res.message}`;
+                $('#testResult').html(html);
+            }, 'json');
+        });
+        
+        // Genera dati fittizi
+        $('#mockDataBtn').click(function() {
+            if(confirm('Generare dati di test Stripe?')) {
+                $.post('', {action: 'insert_test_data'}, function(res) {
+                    $('#mockDataResult').html(`Inseriti ${res.inserted} record`);
+                }, 'json');
+            }
+        });
+        
+        // Carica tabelle
+        function loadTables() {
+            $.post('', {action: 'get_tables'}, function(res) {
+                $('#tableSelect').html('<option value="">Seleziona una tabella</option>');
+                $.each(res.data, function(i, table) {
+                    $('#tableSelect').append(`<option value="${table}">${table}</option>`);
+                });
+            }, 'json');
+        }
+        
+        // Carica dati tabella
+        $('#tableSelect').change(function() {
+            loadTableData($(this).val(), 1);
+        });
+        
+        function loadTableData(table, page) {
+            if(!table) return;
+            
+            $.post('', {
+                action: 'get_table_data',
+                table: table,
+                page: page
+            }, function(res) {
+                // Costruisci intestazioni
+                let thead = '';
+                $.each(res.columns, function(i, col) {
+                    thead += `<th>${col}</th>`;
+                });
+                $('#dataTable thead').html(`<tr>${thead}</tr>`);
+                
+                // Costruisci corpo
+                let tbody = '';
+                $.each(res.data, function(i, row) {
+                    let tr = '';
+                    $.each(row, function(key, val) {
+                        tr += `<td>${val !== null ? val : '<em>NULL</em>'}</td>`;
+                    });
+                    tbody += `<tr>${tr}</tr>`;
+                });
+                $('#dataTable tbody').html(tbody);
+                
+                // Rendi tabella responsive
+                $('#dataTable').DataTable({
+                    responsive: true,
+                    destroy: true
+                });
+            }, 'json');
+        }
+        
+        // Inizializzazione
+        loadTables();
+        $('#testBtn').trigger('click');
+    });
+    </script>
 </body>
 </html>
