@@ -2,63 +2,37 @@
 session_start();
 
 // ==============================================
-// CARICAMENTO VARIABILI D'AMBIENTE (senza dipendenze esterne)
+// CONFIGURAZIONE DA VARIABILI D'AMBIENTE
 // ==============================================
 
-function loadEnv() {
-    $envPath = __DIR__ . '/.env';
-    if (file_exists($envPath)) {
-        $lines = file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        foreach ($lines as $line) {
-            if (strpos(trim($line), '#') === 0 || strpos($line, '=') === false) continue;
-            
-            list($name, $value) = explode('=', $line, 2);
-            $name = trim($name);
-            $value = trim($value);
-            
-            // Rimuovi virgolette se presenti
-            if (preg_match('/^([\'"])(.*)\1$/', $value, $matches)) {
-                $value = $matches[2];
-            }
-            
-            $_ENV[$name] = $value;
-            putenv("$name=$value");
-        }
-    }
-}
-
-loadEnv();
-
-// Funzione helper per leggere env con default
+// Funzione per leggere variabili d'ambiente con fallback
 function env($key, $default = null) {
     $value = $_ENV[$key] ?? getenv($key);
     return $value !== false ? $value : $default;
 }
 
-// ==============================================
-// CONFIGURAZIONE DA VARIABILI D'AMBIENTE
-// ==============================================
-
+// Configurazione PostgreSQL (obbligatorie)
 $DB_CONFIG = [
     'host'     => env('DB_HOST'),
-    'port'     => (int)env('DB_PORT', '5432'),
+    'port'     => (int)env('DB_PORT', 5432),
     'dbname'   => env('DB_NAME'),
     'user'     => env('DB_USER'),
     'password' => env('DB_PASSWORD'),
     'ssl_mode' => env('DB_SSL_MODE', 'require')
 ];
 
+// Configurazione Admin (opzionali)
 $ADMIN_CREDENTIALS = [
     'username' => env('ADMIN_USER', 'admin'),
     'password' => env('ADMIN_PASSWORD') ? password_hash(env('ADMIN_PASSWORD'), PASSWORD_DEFAULT) 
                   : password_hash('admin123', PASSWORD_DEFAULT)
 ];
 
-// Verifica credenziali obbligatorie
-$requiredVars = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'];
-foreach ($requiredVars as $var) {
+// Verifica variabili obbligatorie
+$required = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'];
+foreach ($required as $var) {
     if (empty(env($var))) {
-        die("<div class='alert alert-danger'>Errore: Variabile d'ambiente $var mancante</div>");
+        die("<div class='alert alert-danger'>Errore: Variabile <code>$var</code> mancante</div>");
     }
 }
 
@@ -70,11 +44,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
     if ($_POST['username'] === $ADMIN_CREDENTIALS['username'] && 
         password_verify($_POST['password'], $ADMIN_CREDENTIALS['password'])) {
         $_SESSION['authenticated'] = true;
-        $_SESSION['username'] = $ADMIN_CREDENTIALS['username'];
         header("Location: ?");
         exit;
     } else {
-        $loginError = "Credenziali non valide";
+        $login_error = "Credenziali non valide";
     }
 }
 
@@ -98,15 +71,14 @@ function getPDO() {
 
         $pdo = new PDO($dsn, $DB_CONFIG['user'], $DB_CONFIG['password'], [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES => false
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
         ]);
-        
+
         // Forza SSL se richiesto
         if ($DB_CONFIG['ssl_mode'] === 'require') {
             $pdo->exec("SET sslmode=require");
         }
-        
+
         return $pdo;
     } catch (PDOException $e) {
         die("<div class='alert alert-danger'>Errore di connessione: " . htmlspecialchars($e->getMessage()) . "</div>");
@@ -126,21 +98,16 @@ if (($_SESSION['authenticated'] ?? false) && $action) {
         
         switch ($action) {
             case 'test_connection':
-                $response = [
-                    'status' => 'success',
-                    'data' => $pdo->query("SELECT NOW() AS db_time, version() AS pg_version")->fetch()
-                ];
+                $response = ['status' => 'success', 'data' => $pdo->query("SELECT NOW() AS time, version() AS version")->fetch()];
                 break;
                 
             case 'get_tables':
-                $tables = $pdo->query("
+                $response = ['status' => 'success', 'data' => $pdo->query("
                     SELECT table_name 
                     FROM information_schema.tables 
                     WHERE table_schema = 'public'
                     ORDER BY table_name
-                ")->fetchAll(PDO::FETCH_COLUMN);
-                
-                $response = ['status' => 'success', 'data' => $tables];
+                ")->fetchAll(PDO::FETCH_COLUMN)];
                 break;
                 
             case 'get_table_data':
@@ -153,50 +120,39 @@ if (($_SESSION['authenticated'] ?? false) && $action) {
                 $limit = 20;
                 $offset = ($page - 1) * $limit;
                 
-                $stmt = $pdo->prepare("SELECT * FROM $table LIMIT :limit OFFSET :offset");
-                $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-                $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
-                $stmt->execute();
-                
+                $stmt = $pdo->prepare("SELECT * FROM $table LIMIT ? OFFSET ?");
+                $stmt->execute([$limit, $offset]);
                 $data = $stmt->fetchAll();
-                $columns = $data ? array_keys($data[0]) : [];
                 
                 $response = [
                     'status' => 'success',
                     'data' => $data,
-                    'columns' => $columns,
+                    'columns' => !empty($data) ? array_keys($data[0]) : [],
                     'total' => (int)$pdo->query("SELECT COUNT(*) FROM $table")->fetchColumn()
                 ];
                 break;
                 
             case 'insert_mock_data':
-                $mockEvents = [
-                    [
-                        'type' => 'payment_intent.succeeded',
-                        'data' => [
-                            'id' => 'pi_' . bin2hex(random_bytes(8)),
-                            'amount' => rand(1000, 10000),
-                            'currency' => 'usd',
-                            'status' => 'succeeded',
-                            'created' => time()
-                        ]
+                $events = [
+                    'payment_intent.succeeded' => [
+                        'id' => 'pi_' . bin2hex(random_bytes(8)),
+                        'amount' => rand(1000, 10000),
+                        'currency' => 'usd',
+                        'status' => 'succeeded'
                     ],
-                    [
-                        'type' => 'charge.succeeded',
-                        'data' => [
-                            'id' => 'ch_' . bin2hex(random_bytes(8)),
-                            'amount' => rand(500, 5000),
-                            'currency' => 'eur',
-                            'paid' => true
-                        ]
+                    'charge.succeeded' => [
+                        'id' => 'ch_' . bin2hex(random_bytes(8)),
+                        'amount' => rand(500, 5000),
+                        'currency' => 'eur',
+                        'paid' => true
                     ]
                 ];
                 
                 $inserted = 0;
                 $stmt = $pdo->prepare("INSERT INTO stripe_events (event_type, payload) VALUES (?, ?)");
                 
-                foreach ($mockEvents as $event) {
-                    if ($stmt->execute([$event['type'], json_encode($event['data'])])) {
+                foreach ($events as $type => $data) {
+                    if ($stmt->execute([$type, json_encode($data)])) {
                         $inserted++;
                     }
                 }
@@ -208,16 +164,15 @@ if (($_SESSION['authenticated'] ?? false) && $action) {
         $response = ['status' => 'error', 'message' => $e->getMessage()];
     }
     
-    if ($action) {
-        header('Content-Type: application/json');
-        echo json_encode($response);
-        exit;
-    }
+    header('Content-Type: application/json');
+    echo json_encode($response);
+    exit;
 }
 
 // ==============================================
 // INTERFACCIA HTML
 // ==============================================
+
 if (!($_SESSION['authenticated'] ?? false)) {
     // Pagina di Login
     ?>
@@ -229,27 +184,17 @@ if (!($_SESSION['authenticated'] ?? false)) {
         <title>Login Admin</title>
         <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
         <style>
-            body { background-color: #f8f9fa; }
-            .login-container {
-                height: 100vh;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-            }
-            .login-card {
-                width: 100%;
-                max-width: 400px;
-                box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
-            }
+            body { background-color: #f8f9fa; height: 100vh; display: flex; align-items: center; }
+            .login-card { max-width: 400px; margin: 0 auto; box-shadow: 0 0.5rem 1rem rgba(0,0,0,0.1); }
         </style>
     </head>
     <body>
-        <div class="login-container">
+        <div class="container">
             <div class="login-card card">
                 <div class="card-body p-4">
                     <h2 class="text-center mb-4">Accesso Admin</h2>
-                    <?php if (isset($loginError)): ?>
-                        <div class="alert alert-danger"><?= htmlspecialchars($loginError) ?></div>
+                    <?php if (isset($login_error)): ?>
+                        <div class="alert alert-danger"><?= htmlspecialchars($login_error) ?></div>
                     <?php endif; ?>
                     <form method="POST">
                         <input type="hidden" name="login" value="1">
@@ -288,18 +233,10 @@ if (!($_SESSION['authenticated'] ?? false)) {
             --secondary: #6c757d;
         }
         body { background-color: #f8f9fa; }
-        .navbar { background-color: var(--primary) !important; }
-        .card-hover:hover {
-            transform: translateY(-5px);
-            transition: transform 0.2s;
-            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
-        }
-        .table-container {
-            max-height: 65vh;
-            overflow-y: auto;
-        }
+        .navbar { background-color: var(--primary); }
+        .card-hover:hover { transform: translateY(-5px); transition: transform 0.2s; }
+        .table-container { max-height: 65vh; overflow-y: auto; }
         .cursor-pointer { cursor: pointer; }
-        .monospace { font-family: SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; }
     </style>
 </head>
 <body>
@@ -308,7 +245,7 @@ if (!($_SESSION['authenticated'] ?? false)) {
         <div class="container">
             <span class="navbar-brand">PostgreSQL Admin</span>
             <div class="d-flex align-items-center">
-                <span class="text-white me-3">Benvenuto, <?= htmlspecialchars($_SESSION['username']) ?></span>
+                <span class="text-white me-3">Benvenuto, <?= htmlspecialchars($ADMIN_CREDENTIALS['username']) ?></span>
                 <a href="?logout=1" class="btn btn-danger btn-sm">
                     <i class="bi bi-box-arrow-right"></i> Logout
                 </a>
@@ -330,7 +267,6 @@ if (!($_SESSION['authenticated'] ?? false)) {
                             <i class="bi bi-check-circle-fill"></i> Connesso
                         </div>
                         <small class="text-muted d-block mt-2">Host: <?= htmlspecialchars($DB_CONFIG['host']) ?></small>
-                        <small class="text-muted">Database: <?= htmlspecialchars($DB_CONFIG['dbname']) ?></small>
                     </div>
                 </div>
             </div>
@@ -356,7 +292,7 @@ if (!($_SESSION['authenticated'] ?? false)) {
                             <i class="bi bi-list-check"></i> Tabelle Disponibili
                         </h5>
                         <select id="table-select" class="form-select">
-                            <option value="">Caricamento in corso...</option>
+                            <option value="">Caricamento...</option>
                         </select>
                     </div>
                 </div>
@@ -369,11 +305,9 @@ if (!($_SESSION['authenticated'] ?? false)) {
                 <h5 class="mb-0 text-primary">
                     <i class="bi bi-table"></i> Dati Tabella
                 </h5>
-                <div>
-                    <button id="refresh-btn" class="btn btn-sm btn-outline-secondary">
-                        <i class="bi bi-arrow-clockwise"></i> Aggiorna
-                    </button>
-                </div>
+                <button id="refresh-btn" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-arrow-clockwise"></i> Aggiorna
+                </button>
             </div>
             
             <div class="table-container p-3">
@@ -392,202 +326,128 @@ if (!($_SESSION['authenticated'] ?? false)) {
     <!-- JavaScript -->
     <script>
     document.addEventListener('DOMContentLoaded', function() {
-        // Funzione per escape HTML
-        function escapeHtml(unsafe) {
-            return unsafe?.toString()?.replace(/[&<>"']/g, function(m) {
-                return {
-                    '&': '&amp;',
-                    '<': '&lt;',
-                    '>': '&gt;',
-                    '"': '&quot;',
-                    "'": '&#039;'
-                }[m];
-            }) || '';
-        }
+        // Funzioni di supporto
+        const escapeHtml = str => str?.toString()?.replace(/[&<>"']/g, 
+            m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])) || '';
         
-        // Funzione per mostrare errori
-        function showError(error) {
-            console.error(error);
-            alert('Errore: ' + (error.message || error.statusText || 'Errore sconosciuto'));
+        const showError = err => {
+            console.error(err);
+            alert('Errore: ' + (err.message || err.statusText || 'Errore sconosciuto'));
+        };
+
+        // API Request
+        async function apiRequest(action, data = {}) {
+            const formData = new FormData();
+            formData.append('action', action);
+            for (const key in data) {
+                formData.append(key, data[key]);
+            }
+            
+            try {
+                const response = await fetch('', { method: 'POST', body: formData });
+                return await response.json();
+            } catch (error) {
+                showError(error);
+                return { status: 'error', message: error.message };
+            }
         }
-        
-        // Test connessione al database
-        function testConnection() {
-            fetch('', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: 'action=test_connection'
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    const dbStatus = document.getElementById('db-status');
-                    dbStatus.innerHTML = `
-                        <i class="bi bi-check-circle-fill text-success"></i> Connesso
-                        <div class="small mt-1">${escapeHtml(data.data.pg_version)}</div>
-                        <div class="small">${escapeHtml(data.data.db_time)}</div>
-                    `;
-                }
-            })
-            .catch(showError);
+
+        // Test connessione
+        async function testConnection() {
+            const res = await apiRequest('test_connection');
+            if (res.status === 'success') {
+                document.getElementById('db-status').innerHTML = `
+                    <i class="bi bi-check-circle-fill text-success"></i> Connesso
+                    <div class="small">${escapeHtml(res.data.version)}</div>
+                    <div class="small">${escapeHtml(res.data.time)}</div>
+                `;
+            }
         }
-        
-        // Carica elenco tabelle
-        function loadTables() {
-            fetch('', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: 'action=get_tables'
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    const select = document.getElementById('table-select');
-                    select.innerHTML = '<option value="">Seleziona una tabella</option>';
-                    
-                    data.data.forEach(table => {
-                        const option = document.createElement('option');
-                        option.value = table;
-                        option.textContent = table;
-                        select.appendChild(option);
-                    });
-                }
-            })
-            .catch(showError);
+
+        // Carica tabelle
+        async function loadTables() {
+            const res = await apiRequest('get_tables');
+            if (res.status === 'success') {
+                const select = document.getElementById('table-select');
+                select.innerHTML = '<option value="">Seleziona una tabella</option>';
+                res.data.forEach(table => {
+                    select.innerHTML += `<option value="${escapeHtml(table)}">${escapeHtml(table)}</option>`;
+                });
+            }
         }
-        
+
         // Carica dati tabella
-        function loadTableData(table, page = 1) {
+        async function loadTableData(table, page = 1) {
             if (!table) return;
             
-            const formData = new FormData();
-            formData.append('action', 'get_table_data');
-            formData.append('table', table);
-            formData.append('page', page);
+            const res = await apiRequest('get_table_data', { table, page });
+            if (res.status !== 'success') return;
             
-            fetch('', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status !== 'success') {
-                    throw new Error(data.message || 'Errore nel caricamento dati');
-                }
-                
-                const tableEl = document.getElementById('data-table');
-                const thead = tableEl.querySelector('thead');
-                const tbody = tableEl.querySelector('tbody');
-                
-                // Intestazione
-                thead.innerHTML = '';
-                if (data.columns && data.columns.length > 0) {
-                    const headerRow = document.createElement('tr');
-                    data.columns.forEach(col => {
-                        const th = document.createElement('th');
-                        th.textContent = col;
-                        headerRow.appendChild(th);
-                    });
-                    thead.appendChild(headerRow);
-                }
-                
-                // Dati
-                tbody.innerHTML = '';
-                if (data.data && data.data.length > 0) {
-                    data.data.forEach(row => {
-                        const tr = document.createElement('tr');
-                        tr.className = 'cursor-pointer';
-                        
-                        data.columns.forEach(col => {
-                            const td = document.createElement('td');
-                            const value = row[col];
-                            
-                            if (value === null) {
-                                td.innerHTML = '<em>NULL</em>';
-                            } else if (typeof value === 'object') {
-                                td.textContent = JSON.stringify(value);
-                            } else {
-                                td.textContent = value;
-                            }
-                            
-                            tr.appendChild(td);
-                        });
-                        
-                        tbody.appendChild(tr);
-                    });
-                }
-                
-                // Paginazione
-                const totalPages = Math.ceil(data.total / 20);
-                const pagination = document.getElementById('pagination');
-                pagination.innerHTML = '';
-                
-                if (totalPages > 1) {
-                    for (let i = 1; i <= totalPages; i++) {
-                        const li = document.createElement('li');
-                        li.className = `page-item ${i === page ? 'active' : ''}`;
-                        
-                        const a = document.createElement('a');
-                        a.className = 'page-link';
-                        a.href = '#';
-                        a.textContent = i;
-                        
-                        a.addEventListener('click', (e) => {
-                            e.preventDefault();
-                            loadTableData(table, i);
-                        });
-                        
-                        li.appendChild(a);
-                        pagination.appendChild(li);
-                    }
-                }
-            })
-            .catch(showError);
+            // Intestazione
+            let thead = '';
+            res.columns?.forEach(col => {
+                thead += `<th>${escapeHtml(col)}</th>`;
+            });
+            document.querySelector('#data-table thead').innerHTML = `<tr>${thead}</tr>`;
+            
+            // Dati
+            let tbody = '';
+            res.data?.forEach(row => {
+                let tr = '<tr class="cursor-pointer">';
+                res.columns?.forEach(col => {
+                    tr += `<td>${row[col] === null ? '<em>NULL</em>' : escapeHtml(row[col])}</td>`;
+                });
+                tbody += tr + '</tr>';
+            });
+            document.querySelector('#data-table tbody').innerHTML = tbody;
+            
+            // Paginazione
+            const totalPages = Math.ceil(res.total / 20);
+            const pagination = document.getElementById('pagination');
+            pagination.innerHTML = '';
+            
+            for (let i = 1; i <= totalPages; i++) {
+                pagination.innerHTML += `
+                    <li class="page-item ${i === page ? 'active' : ''}">
+                        <a class="page-link" href="#" data-page="${i}">${i}</a>
+                    </li>
+                `;
+            }
+            
+            // Eventi paginazione
+            document.querySelectorAll('#pagination .page-link').forEach(link => {
+                link.addEventListener('click', e => {
+                    e.preventDefault();
+                    loadTableData(table, parseInt(e.target.dataset.page));
+                });
+            });
         }
-        
+
         // Genera dati fittizi
-        document.getElementById('mock-data-btn').addEventListener('click', function() {
+        document.getElementById('mock-data-btn').addEventListener('click', async () => {
             if (confirm('Generare dati di test Stripe?')) {
-                fetch('', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                    body: 'action=insert_mock_data'
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        const resultDiv = document.getElementById('mock-data-result');
-                        resultDiv.innerHTML = `
-                            <div class="alert alert-success p-2 mt-2">
-                                <i class="bi bi-check-circle"></i> Inseriti ${data.inserted} eventi fittizi
-                            </div>
-                        `;
-                        loadTables();
-                    }
-                })
-                .catch(showError);
+                const res = await apiRequest('insert_mock_data');
+                if (res.status === 'success') {
+                    document.getElementById('mock-data-result').innerHTML = `
+                        <div class="alert alert-success p-2 mt-2">
+                            <i class="bi bi-check-circle"></i> Inseriti ${res.inserted} eventi
+                        </div>
+                    `;
+                    loadTables();
+                }
             }
         });
-        
-        // Gestione selezione tabella
+
+        // Event listeners
         document.getElementById('table-select').addEventListener('change', function() {
             loadTableData(this.value);
         });
         
-        // Aggiorna dati
         document.getElementById('refresh-btn').addEventListener('click', function() {
             const table = document.getElementById('table-select').value;
-            if (table) {
-                loadTableData(table);
-            }
+            if (table) loadTableData(table);
         });
-        
+
         // Inizializzazione
         testConnection();
         loadTables();
