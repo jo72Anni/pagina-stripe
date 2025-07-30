@@ -1,57 +1,72 @@
+<?php
+// ==============================================
+// BACKEND PHP (eseguito sul server)
+// ==============================================
+$db_connected = false;
+$db_error = "";
+$db_result = null;
+
+// Configurazione del database (modifica con i tuoi dati Render)
+$db_config = [
+    'host' => 'dpg-d257e563jp1c73e216h0-a.oregon-postgres.render.com',
+    'port' => 5432,
+    'dbname' => 'dbstripe_ul7f',
+    'user' => 'dbstripe_ul7f_user',
+    'password' => 'j7rP4lHTCdjmlVNIRouEhlJLiX8LiZue',
+    'ssl_mode' => 'require'
+];
+
+// Tentativo di connessione quando si invia il form
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    try {
+        $connection_string = sprintf(
+            "host=%s port=%d dbname=%s user=%s password=%s sslmode=%s",
+            $db_config['host'],
+            $db_config['port'],
+            $db_config['dbname'],
+            $db_config['user'],
+            $db_config['password'],
+            $db_config['ssl_mode']
+        );
+
+        $db_conn = pg_connect($connection_string);
+        
+        if ($db_conn) {
+            $db_connected = true;
+            $result = pg_query($db_conn, "SELECT NOW() AS current_time, version() AS pg_version");
+            $db_result = pg_fetch_assoc($result);
+            pg_close($db_conn);
+        } else {
+            $db_error = "Connessione fallita senza errori specifici";
+        }
+    } catch (Exception $e) {
+        $db_error = $e->getMessage();
+    }
+}
+?>
+
+<!-- ============================================== -->
+<!-- FRONTEND HTML -->
+<!-- ============================================== -->
 <!DOCTYPE html>
-<html lang="en">
+<html lang="it">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stripe Events Manager</title>
+    <title>Test Connessione PostgreSQL</title>
     <style>
         body {
             font-family: Arial, sans-serif;
-            line-height: 1.6;
-            margin: 0;
-            padding: 20px;
-            background-color: #f5f5f5;
-            color: #333;
-        }
-        .container {
-            max-width: 1200px;
+            max-width: 800px;
             margin: 0 auto;
-            background-color: white;
             padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            line-height: 1.6;
         }
         h1 {
             color: #6772e5;
-            text-align: center;
-        }
-        .section {
-            margin-bottom: 30px;
-            padding: 20px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-        }
-        .form-group {
-            margin-bottom: 15px;
-        }
-        label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-        input, textarea, select {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            box-sizing: border-box;
-        }
-        textarea {
-            height: 150px;
-            font-family: monospace;
         }
         button {
-            background-color: #6772e5;
+            background: #6772e5;
             color: white;
             border: none;
             padding: 10px 15px;
@@ -60,274 +75,83 @@
             font-size: 16px;
         }
         button:hover {
-            background-color: #5469d4;
+            background: #5469d4;
         }
-        table {
-            width: 100%;
-            border-collapse: collapse;
+        .result {
             margin-top: 20px;
-        }
-        th, td {
-            border: 1px solid #ddd;
-            padding: 8px;
-            text-align: left;
-        }
-        th {
-            background-color: #f2f2f2;
-        }
-        tr:nth-child(even) {
-            background-color: #f9f9f9;
-        }
-        .error {
-            color: #d00;
-            margin-top: 10px;
+            padding: 15px;
+            border-radius: 4px;
         }
         .success {
-            color: #090;
-            margin-top: 10px;
+            background: #e6f7e6;
+            border: 1px solid #4CAF50;
+            color: #2d572c;
         }
-        .json-viewer {
-            max-height: 200px;
-            overflow-y: auto;
-            border: 1px solid #ddd;
-            padding: 10px;
-            background-color: #f8f8f8;
+        .error {
+            background: #ffebee;
+            border: 1px solid #f44336;
+            color: #d32f2f;
+        }
+        .config {
+            background: #f0f0f0;
+            padding: 15px;
             border-radius: 4px;
+            margin-bottom: 20px;
             font-family: monospace;
-            white-space: pre-wrap;
+        }
+        pre {
+            background: #f8f8f8;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Stripe Events Manager</h1>
-        
-        <div class="section">
-            <h2>Database Connection</h2>
-            <div class="form-group">
-                <label for="dbHost">Host:</label>
-                <input type="text" id="dbHost" value="dpg-d257e563jp1c73e216h0-a.oregon-postgres.render.com">
-            </div>
-            <div class="form-group">
-                <label for="dbPort">Port:</label>
-                <input type="text" id="dbPort" value="5432">
-            </div>
-            <div class="form-group">
-                <label for="dbName">Database:</label>
-                <input type="text" id="dbName" value="dbstripe_ul7f">
-            </div>
-            <div class="form-group">
-                <label for="dbUser">Username:</label>
-                <input type="text" id="dbUser" value="dbstripe_ul7f_user">
-            </div>
-            <div class="form-group">
-                <label for="dbPassword">Password:</label>
-                <input type="password" id="dbPassword" value="j7rP4lHTCdjmlVNIRouEhlJLiX8LiZue">
-            </div>
-            <button id="testConnection">Test Connection</button>
-            <div id="connectionStatus"></div>
-        </div>
-        
-        <div class="section">
-            <h2>Add New Event</h2>
-            <div class="form-group">
-                <label for="eventId">Event ID:</label>
-                <input type="text" id="eventId" placeholder="evt_1...">
-            </div>
-            <div class="form-group">
-                <label for="eventType">Event Type:</label>
-                <input type="text" id="eventType" placeholder="payment_intent.succeeded">
-            </div>
-            <div class="form-group">
-                <label for="eventPayload">Payload (JSON):</label>
-                <textarea id="eventPayload" placeholder='{
-    "id": "evt_1...",
-    "object": "event",
-    "api_version": "2023-08-16",
-    "created": 1234567890,
-    "data": {
-        "object": {
-            "id": "pi_1...",
-            "object": "payment_intent",
-            "amount": 1000,
-            "currency": "usd"
-        }
-    }
-}'></textarea>
-            </div>
-            <button id="addEvent">Add Event</button>
-            <div id="addEventStatus"></div>
-        </div>
-        
-        <div class="section">
-            <h2>Event List</h2>
-            <button id="refreshEvents">Refresh Events</button>
-            <div id="eventsTable"></div>
-        </div>
+    <h1>Test Connessione PostgreSQL</h1>
+    
+    <div class="config">
+        <h3>Configurazione Database</h3>
+        <pre><?= htmlspecialchars(json_encode($db_config, JSON_PRETTY_PRINT)) ?></pre>
     </div>
 
-    <script>
-        // Database configuration
-        const config = {
-            host: document.getElementById('dbHost').value,
-            port: document.getElementById('dbPort').value,
-            database: document.getElementById('dbName').value,
-            user: document.getElementById('dbUser').value,
-            password: document.getElementById('dbPassword').value,
-            ssl: true
-        };
+    <form method="POST">
+        <button type="submit">Testa Connessione</button>
+    </form>
 
-        // Test database connection
-        document.getElementById('testConnection').addEventListener('click', async () => {
-            const statusElement = document.getElementById('connectionStatus');
-            statusElement.textContent = "Testing connection...";
-            statusElement.className = "";
-            
-            try {
-                const response = await fetch('https://postgres-proxy-server.onrender.com/test-connection', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(config)
-                });
-                
-                const result = await response.json();
-                
-                if (result.success) {
-                    statusElement.textContent = "✅ Connection successful!";
-                    statusElement.className = "success";
-                } else {
-                    statusElement.textContent = `❌ Connection failed: ${result.error}`;
-                    statusElement.className = "error";
-                }
-            } catch (error) {
-                statusElement.textContent = `❌ Error: ${error.message}`;
-                statusElement.className = "error";
-            }
-        });
+    <div class="result <?= $db_connected ? 'success' : 'error' ?>">
+        <?php if ($_SERVER['REQUEST_METHOD'] === 'POST'): ?>
+            <?php if ($db_connected): ?>
+                <h3>✅ Connessione Riuscita!</h3>
+                <pre><?= htmlspecialchars(json_encode($db_result, JSON_PRETTY_PRINT)) ?></pre>
+                <p>Ora corrente nel database: <strong><?= $db_result['current_time'] ?></strong></p>
+                <p>Versione PostgreSQL: <strong><?= $db_result['pg_version'] ?></strong></p>
+            <?php else: ?>
+                <h3>❌ Errore di Connessione</h3>
+                <p><?= htmlspecialchars($db_error) ?></p>
+                <h4>Problemi comuni:</h4>
+                <ul>
+                    <li>Credenziali errate</li>
+                    <li>Server PostgreSQL non raggiungibile</li>
+                    <li>Mancanza dell'estensione <code>pgsql</code> in PHP</li>
+                    <li>Problemi di SSL (Render richiede connessioni sicure)</li>
+                </ul>
+            <?php endif; ?>
+        <?php else: ?>
+            <p>Clicca il pulsante per testare la connessione al database</p>
+        <?php endif; ?>
+    </div>
 
-        // Add new event
-        document.getElementById('addEvent').addEventListener('click', async () => {
-            const statusElement = document.getElementById('addEventStatus');
-            statusElement.textContent = "Adding event...";
-            statusElement.className = "";
-            
-            const eventId = document.getElementById('eventId').value.trim();
-            const eventType = document.getElementById('eventType').value.trim();
-            const eventPayload = document.getElementById('eventPayload').value.trim();
-            
-            if (!eventId || !eventType || !eventPayload) {
-                statusElement.textContent = "❌ Please fill in all fields";
-                statusElement.className = "error";
-                return;
-            }
-            
-            try {
-                // Validate JSON
-                const payloadJson = JSON.parse(eventPayload);
-                
-                const response = await fetch('https://postgres-proxy-server.onrender.com/add-event', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        ...config,
-                        eventId,
-                        eventType,
-                        payload: payloadJson
-                    })
-                });
-                
-                const result = await response.json();
-                
-                if (result.success) {
-                    statusElement.textContent = "✅ Event added successfully!";
-                    statusElement.className = "success";
-                    // Clear form
-                    document.getElementById('eventId').value = '';
-                    document.getElementById('eventType').value = '';
-                    document.getElementById('eventPayload').value = '';
-                    // Refresh events list
-                    loadEvents();
-                } else {
-                    statusElement.textContent = `❌ Error adding event: ${result.error}`;
-                    statusElement.className = "error";
-                }
-            } catch (error) {
-                statusElement.textContent = `❌ Error: ${error.message}`;
-                statusElement.className = "error";
-            }
-        });
+    <h2>Requisiti PHP</h2>
+    <p>Per far funzionare questo script, il tuo server PHP deve avere:</p>
+    <ul>
+        <li>Estensione <code>pgsql</code> abilitata</li>
+        <li>Connessione in uscita verso <code>dpg-d257e563jp1c73e216h0-a.oregon-postgres.render.com:5432</code></li>
+    </ul>
 
-        // Load and display events
-        async function loadEvents() {
-            const eventsTable = document.getElementById('eventsTable');
-            eventsTable.innerHTML = "<p>Loading events...</p>";
-            
-            try {
-                const response = await fetch('https://postgres-proxy-server.onrender.com/get-events', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(config)
-                });
-                
-                const result = await response.json();
-                
-                if (result.success) {
-                    if (result.data.length === 0) {
-                        eventsTable.innerHTML = "<p>No events found in the database.</p>";
-                        return;
-                    }
-                    
-                    let tableHTML = `
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Event ID</th>
-                                    <th>Event Type</th>
-                                    <th>Received At</th>
-                                    <th>Payload</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                    `;
-                    
-                    result.data.forEach(event => {
-                        tableHTML += `
-                            <tr>
-                                <td>${event.id}</td>
-                                <td>${event.event_id}</td>
-                                <td>${event.event_type}</td>
-                                <td>${new Date(event.received_at).toLocaleString()}</td>
-                                <td><div class="json-viewer">${JSON.stringify(event.payload, null, 2)}</div></td>
-                            </tr>
-                        `;
-                    });
-                    
-                    tableHTML += `
-                            </tbody>
-                        </table>
-                    `;
-                    
-                    eventsTable.innerHTML = tableHTML;
-                } else {
-                    eventsTable.innerHTML = `<p class="error">Error loading events: ${result.error}</p>`;
-                }
-            } catch (error) {
-                eventsTable.innerHTML = `<p class="error">Error: ${error.message}</p>`;
-            }
-        }
-
-        // Refresh events button
-        document.getElementById('refreshEvents').addEventListener('click', loadEvents);
-        
-        // Load events on page load
-        document.addEventListener('DOMContentLoaded', loadEvents);
-    </script>
+    <h2>Come verificare l'estensione pgsql</h2>
+    <p>Crea un file <code>phpinfo.php</code> con:</p>
+    <pre><?= htmlspecialchars('<?php phpinfo(); ?>') ?></pre>
+    <p>Cerca "pgsql" nella pagina risultante. Se non è presente, abilitala nel php.ini.</p>
 </body>
 </html>
