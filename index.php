@@ -89,7 +89,7 @@ if ($action) {
     exit;
 }
 ?>
-<!-- HTML RESTO INVARIATO -->
+
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -122,5 +122,6 @@ if ($action) {
     </script>
 </body>
 </html>
+
 
 
