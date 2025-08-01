@@ -326,7 +326,11 @@ if ($action && isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     echo json_encode($response);
     exit;
 }
-
+// Pagina di login se non autenticato
+if (!isset($_SESSION['loggedin'])) {
+    ?>
+    <!DOCTYPE html>
+    <html lang="it">
 // Pagina di login se non autenticato
 if (!isset($_SESSION['loggedin']) {
     ?>
@@ -371,7 +375,9 @@ if (!isset($_SESSION['loggedin']) {
     </html>
     <?php
     exit;
+
 }
+
 
 // Interfaccia principale
 ?>
@@ -1757,4 +1763,5 @@ if (!isset($_SESSION['loggedin']) {
 </body>
 </html>
 <?php } ?>
+
 
