@@ -4,6 +4,9 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
+// Include l'autoloader di Composer per Stripe
+require_once __DIR__ . '/vendor/autoload.php';
+
 // Configurazione DB da variabili ambiente o valori di default
 $db = [
     'host'     => getenv('DB_HOST') ?: 'localhost',
@@ -19,6 +22,15 @@ $stripeConfig = [
     'publishable_key' => getenv('STRIPE_PUBLISHABLE_KEY') ?: 'pk_test_your_publishable_key',
     'secret_key' => getenv('STRIPE_SECRET_KEY') ?: 'sk_test_your_secret_key'
 ];
+
+// Imposta la chiave segreta Stripe SOLO se è configurata correttamente
+if (!empty($stripeConfig['secret_key']) && $stripeConfig['secret_key'] !== 'sk_test_your_secret_key') {
+    \Stripe\Stripe::setApiKey($stripeConfig['secret_key']);
+    $stripeInitialized = true;
+} else {
+    $stripeInitialized = false;
+}
+
 
 // Imposta la chiave segreta Stripe
 \Stripe\Stripe::setApiKey($stripeConfig['secret_key']);
