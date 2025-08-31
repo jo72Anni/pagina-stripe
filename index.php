@@ -1,4 +1,12 @@
 <?php
+// RIMUOVI IL PARAMETRO Stripe-Version SE PRESENTE
+if (isset($_POST['Stripe-Version'])) {
+    unset($_POST['Stripe-Version']);
+}
+if (isset($_GET['Stripe-Version'])) {
+    unset($_GET['Stripe-Version']);
+}
+
 // Debug errori
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
@@ -405,7 +413,7 @@ $(function() {
                         }
                     });
             } else {
-                alert('Errore: ' + res.message);
+                alert('Errore: ' . res.message);
                 $('#checkout-button').prop('disabled', false).html('Vai al pagamento');
             }
         }).fail(function() {
@@ -416,4 +424,4 @@ $(function() {
 });
 </script>
 </body>
-</html>>
+</html>
