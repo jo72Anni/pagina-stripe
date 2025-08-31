@@ -34,23 +34,75 @@ $stripeConfig = [
 $stripeInitialized = false;
 if (!empty($stripeConfig['secret_key']) && $stripeConfig['secret_key'] !== 'sk_test_your_secret_key') {
     \Stripe\Stripe::setApiKey($stripeConfig['secret_key']);
+    
+    // Forza la versione principale dell'API Stripe
+    \Stripe\Stripe::setApiVersion('2025-02-24');
+    
     $stripeInitialized = true;
 }
 
 // -------------------
-// Connessione DB
+// Connessione DB con diagnostica avanzata
 // -------------------
 function getDBConnection($config) {
     try {
         $dsn = "pgsql:host={$config['host']};port={$config['port']};dbname={$config['dbname']};sslmode={$config['ssl_mode']}";
-        $pdo = new PDO($dsn, $config['user'], $config['password'], [
+        
+        // Opzioni aggiuntive per SSL su Render
+        $options = [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_TIMEOUT => 5 // Timeout di 5 secondi
-        ]);
+            PDO::ATTR_TIMEOUT => 10,
+            PDO::ATTR_PERSISTENT => false
+        ];
+        
+        // Aggiungi opzioni SSL se necessario
+        if ($config['ssl_mode'] === 'require') {
+            $options[PDO::PGSQL_ATTR_SSL_MODE] = PDO::PGSQL_SSL_REQUIRE;
+        }
+        
+        $pdo = new PDO($dsn, $config['user'], $config['password'], $options);
+        
+        // Test della connessione e della tabella
+        $pdo->query("SELECT 1 FROM pg_tables WHERE tablename = 'products'")->fetch();
+        
         return $pdo;
     } catch (PDOException $e) {
         throw new Exception("Errore connessione DB: " . $e->getMessage());
+    }
+}
+
+// -------------------
+// Creazione tabella products se non esiste
+// -------------------
+function ensureProductsTable($pdo) {
+    try {
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS products (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                description TEXT,
+                price DECIMAL(10,2) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ");
+        
+        // Inserisce alcuni prodotti di esempio se la tabella è vuota
+        $count = $pdo->query("SELECT COUNT(*) FROM products")->fetchColumn();
+        if ($count == 0) {
+            $sampleProducts = [
+                ['name' => 'Prodotto 1', 'description' => 'Descrizione prodotto 1', 'price' => 19.99],
+                ['name' => 'Prodotto 2', 'description' => 'Descrizione prodotto 2', 'price' => 29.99],
+                ['name' => 'Prodotto 3', 'description' => 'Descrizione prodotto 3', 'price' => 39.99]
+            ];
+            
+            $stmt = $pdo->prepare("INSERT INTO products (name, description, price) VALUES (?, ?, ?)");
+            foreach ($sampleProducts as $product) {
+                $stmt->execute([$product['name'], $product['description'], $product['price']]);
+            }
+        }
+    } catch (PDOException $e) {
+        throw new Exception("Errore nella creazione della tabella: " . $e->getMessage());
     }
 }
 
@@ -61,9 +113,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     header('Content-Type: application/json');
     
     try {
+        $pdo = getDBConnection($dbConfig);
+        ensureProductsTable($pdo);
+        
         switch ($_POST['action']) {
             case 'get_products':
-                $pdo = getDBConnection($dbConfig);
                 $products = $pdo->query("SELECT * FROM products")->fetchAll();
                 echo json_encode(['status' => 'success', 'products' => $products]);
                 break;
@@ -120,6 +174,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 // -------------------
 try {
     $pdo = getDBConnection($dbConfig);
+    ensureProductsTable($pdo);
     $dbConnected = true;
     $dbError = null;
 } catch (Exception $e) {
@@ -153,6 +208,11 @@ $currentStripeVersion = class_exists('\Stripe\Stripe') ? (\Stripe\Stripe::getApi
     .card:hover {
         transform: translateY(-5px);
     }
+    .status-badge {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+    }
 </style>
 </head>
 <body>
@@ -165,7 +225,10 @@ $currentStripeVersion = class_exists('\Stripe\Stripe') ? (\Stripe\Stripe::getApi
         - Stripe API Version: <?php echo htmlspecialchars($currentStripeVersion); ?><br>
         - DB Host: <?php echo htmlspecialchars($dbConfig['host']); ?><br>
         - DB Name: <?php echo htmlspecialchars($dbConfig['dbname']); ?><br>
-        - Stripe Configurato: <?php echo $stripeConfigured ? 'Sì' : 'No'; ?>
+        - DB User: <?php echo htmlspecialchars($dbConfig['user']); ?><br>
+        - SSL Mode: <?php echo htmlspecialchars($dbConfig['ssl_mode']); ?><br>
+        - Stripe Configurato: <?php echo $stripeConfigured ? 'Sì' : 'No'; ?><br>
+        - Render Environment: <?php echo getenv('RENDER') ? 'Sì' : 'No'; ?>
     </div>
 
     <div class="alert <?= $dbConnected ? 'alert-success' : 'alert-danger' ?>">
@@ -180,7 +243,11 @@ $currentStripeVersion = class_exists('\Stripe\Stripe') ? (\Stripe\Stripe::getApi
     <div class="row">
         <div class="col-lg-8">
             <h2>Prodotti</h2>
-            <div id="products-container" class="row g-3"></div>
+            <div id="products-container" class="row g-3">
+                <div class="col-12">
+                    <div class="alert alert-info">Caricamento prodotti in corso...</div>
+                </div>
+            </div>
         </div>
         
         <div class="col-lg-4">
@@ -225,13 +292,18 @@ $currentStripeVersion = class_exists('\Stripe\Stripe') ? (\Stripe\Stripe::getApi
     </div>
     <?php else: ?>
     <div class="alert alert-info">
-        <h4>Risoluzione problemi di connessione al database:</h4>
+        <h4>Risoluzione problemi di connessione su Render:</h4>
         <ul>
-            <li>Verifica che PostgreSQL sia in esecuzione</li>
-            <li>Controlla le credenziali del database nelle variabili d'ambiente</li>
-            <li>Assicurati che il database esista</li>
-            <li>Verifica la connessione di rete al server database</li>
+            <li>Verifica che il database PostgreSQL su Render sia attivo</li>
+            <li>Controlla che le variabili d'ambiente su Render siano corrette</li>
+            <li>Assicurati che la connessione SSL sia configurata correttamente</li>
+            <li>Riavvia il servizio su Render dopo aver modificato le variabili d'ambiente</li>
         </ul>
+        <p class="mt-3">
+            <strong>Configurazione Render consigliata:</strong><br>
+            - DB_SSLMODE: require<br>
+            - STRIPE_API_VERSION: 2025-02-24 (solo versione principale)
+        </p>
     </div>
     <?php endif; ?>
 </div>
@@ -244,11 +316,17 @@ let cart = [];
 
 // Carica prodotti
 $(document).ready(function() {
+    loadProducts();
+});
+
+function loadProducts() {
     $.post('', {action: 'get_products'}, function(res) {
         if (res.status === 'success') {
             const container = $('#products-container');
+            container.empty();
+            
             if (res.products.length === 0) {
-                container.html('<div class="col-12"><div class="alert alert-info">Nessun prodotto disponibile</div></div>');
+                container.html('<div class="col-12"><div class="alert alert-warning">Nessun prodotto disponibile nel database</div></div>');
                 return;
             }
             
@@ -289,10 +367,10 @@ $(document).ready(function() {
         } else {
             $('#products-container').html('<div class="col-12"><div class="alert alert-danger">Errore nel caricamento prodotti: ' + res.message + '</div></div>');
         }
-    }).fail(function() {
-        $('#products-container').html('<div class="col-12"><div class="alert alert-danger">Errore di connessione nel caricamento prodotti</div></div>');
+    }).fail(function(xhr, status, error) {
+        $('#products-container').html('<div class="col-12"><div class="alert alert-danger">Errore di connessione: ' + error + '</div></div>');
     });
-});
+}
 
 function updateCart() {
     const $items = $('#cart-items');
@@ -389,8 +467,8 @@ $('#checkout-btn').click(function() {
             alert('Errore: ' + res.message);
             $btn.prop('disabled', false).text('Vai al pagamento');
         }
-    }).fail(function() {
-        alert('Errore di connessione. Riprova più tardi.');
+    }).fail(function(xhr, status, error) {
+        alert('Errore di connessione: ' + error);
         $btn.prop('disabled', false).text('Vai al pagamento');
     });
 });
