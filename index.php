@@ -1,21 +1,4 @@
 <?php
-// RIMUOVI COMPLETAMENTE IL PARAMETRO Stripe-Version DA TUTTE LE RICHIESTE
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    foreach ($_POST as $key => $value) {
-        if (strtolower($key) === 'stripe-version' || $key === 'Stripe-Version') {
-            unset($_POST[$key]);
-        }
-    }
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-    foreach ($_GET as $key => $value) {
-        if (strtolower($key) === 'stripe-version' || $key === 'Stripe-Version') {
-            unset($_GET[$key]);
-        }
-    }
-}
-
 // Debug errori
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
@@ -43,7 +26,6 @@ $stripeConfig = [
 // Imposta la chiave segreta Stripe SOLO se è configurata correttamente
 if (!empty($stripeConfig['secret_key']) && $stripeConfig['secret_key'] !== 'sk_test_your_secret_key') {
     \Stripe\Stripe::setApiKey($stripeConfig['secret_key']);
-    \Stripe\Stripe::setApiVersion('2025-01-27.acacia');
     $stripeInitialized = true;
 } else {
     $stripeInitialized = false;
@@ -72,20 +54,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         switch ($_POST['action']) {
             case 'get_products':
+                // Assumendo che esista una tabella 'products' nel database
                 $products = $pdo->query("SELECT * FROM products")->fetchAll();
                 echo json_encode(['status' => 'success', 'products' => $products]);
                 break;
                 
             case 'create_checkout_session':
-                if (!$stripeInitialized) {
-                    throw new Exception("Stripe non configurato correttamente");
-                }
-                
+                // Verifica che il carrello non sia vuoto
                 $cart = json_decode($_POST['cart'], true);
                 if (empty($cart)) {
                     throw new Exception("Il carrello è vuoto");
                 }
                 
+                // Prepara i line items per Stripe
                 $lineItems = [];
                 foreach ($cart as $item) {
                     $lineItems[] = [
@@ -97,18 +78,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                                     'product_id' => $item['id'],
                                 ],
                             ],
-                            'unit_amount' => (int)($item['price'] * 100),
+                            'unit_amount' => (int)($item['price'] * 100), // Stripe richiede amount in centesimi
                         ],
                         'quantity' => $item['quantity'],
                     ];
                 }
                 
+                // Crea la sessione di checkout
                 $session = \Stripe\Checkout\Session::create([
                     'payment_method_types' => ['card'],
                     'line_items' => $lineItems,
                     'mode' => 'payment',
                     'success_url' => $_SERVER['REQUEST_SCHEME'] . '://' . $_SERVER['HTTP_HOST'] . dirname($_SERVER['PHP_SELF']) . '/success.php?session_id={CHECKOUT_SESSION_ID}',
                     'cancel_url' => $_SERVER['REQUEST_SCHEME'] . '://' . $_SERVER['HTTP_HOST'] . $_SERVER['PHP_SELF'],
+                    'metadata' => [
+                        'customer_email' => $_POST['email'] ?? '',
+                    ],
                     'customer_email' => $_POST['email'] ?? '',
                 ]);
                 
@@ -220,11 +205,6 @@ $stripeKeysConfigured = !empty($stripeConfig['publishable_key']) && !empty($stri
             </div>
         </div>
     </div>
-    <div class="mb-3">
-        <a href="PostgreSQLViewer.php" class="btn btn-outline-secondary">
-            🔎 Apri PostgreSQL Viewer
-        </a>
-    </div>
     <?php endif; ?>
 </div>
 
@@ -250,6 +230,7 @@ $(function() {
             renderProducts(res.products);
         } else {
             console.error('Errore nel caricamento prodotti:', res.message);
+            // Se non ci sono prodotti, mostra un messaggio
             $('#products-container').html('<div class="col-12"><div class="alert alert-info">Nessun prodotto disponibile nel database.</div></div>');
         }
     });
@@ -357,11 +338,12 @@ $(function() {
             cartTotal.text(`€${total.toFixed(2)}`);
             checkoutSection.show();
             
-            // Aggiungi event listener
+            // Aggiungi event listener per i pulsanti di rimozione
             $('.remove-item').click(function() {
                 removeFromCart($(this).data('id'));
             });
             
+            // Aggiungi event listener per aumentare/diminuire quantità
             $('.increase-quantity').click(function() {
                 const productId = $(this).data('id');
                 const item = cart.find(item => item.id === productId);
@@ -394,73 +376,46 @@ $(function() {
     
     // Gestione checkout
     $('#checkout-button').click(function() {
-        console.log('Checkout button clicked');
-        
         <?php if (!$stripeKeysConfigured): ?>
         alert('Stripe non è configurato. Configura le variabili d\'ambiente STRIPE_PUBLISHABLE_KEY e STRIPE_SECRET_KEY');
-        return false;
+        return;
         <?php endif; ?>
         
-        const email = $('#customer-email').val().trim();
-        console.log('Email:', email);
+        const email = $('#customer-email').val();
         
-        if (!email) {
-            alert('Inserisci la tua email');
-            return false;
-        }
-        
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        // Validazione email
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
             alert('Inserisci un indirizzo email valido');
-            return false;
+            return;
         }
         
-        if (cart.length === 0) {
-            alert('Il carrello è vuoto');
-            return false;
-        }
+        // Disabilita il pulsante per evitare click multipli
+        $(this).prop('disabled', true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...');
         
-        const $button = $(this);
-        $button.prop('disabled', true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...');
-        
-        console.log('Sending checkout request...');
-        
-        // Usa fetch invece di $.post per migliore gestione errori
-        fetch('', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: new URLSearchParams({
-                action: 'create_checkout_session',
-                cart: JSON.stringify(cart),
-                email: email
-            })
-        })
-        .then(response => response.json())
-        .then(data => {
-            console.log('Server response:', data);
-            
-            if (data.status === 'success') {
-                console.log('Redirecting to Stripe...');
-                return stripe.redirectToCheckout({
-                    sessionId: data.sessionId
-                });
+        // Crea la sessione di checkout
+        $.post('', {
+            action: 'create_checkout_session',
+            cart: JSON.stringify(cart),
+            email: email
+        }, function(res) {
+            if (res.status === 'success') {
+                // Reindirizza a Stripe Checkout
+                stripe.redirectToCheckout({ sessionId: res.sessionId })
+                    .then(function(result) {
+                        // Se il reindirizzamento fallisce, mostra l'errore
+                        if (result.error) {
+                            alert(result.error.message);
+                            $('#checkout-button').prop('disabled', false).html('Vai al pagamento');
+                        }
+                    });
             } else {
-                throw new Error(data.message || 'Errore del server');
+                alert('Errore: ' + res.message);
+                $('#checkout-button').prop('disabled', false).html('Vai al pagamento');
             }
-        })
-        .then(result => {
-            if (result.error) {
-                throw new Error(result.error.message);
-            }
-        })
-        .catch(error => {
-            console.error('Checkout error:', error);
-            alert('Errore: ' + error.message);
-            $button.prop('disabled', false).html('Vai al pagamento');
+        }).fail(function() {
+            alert('Errore di connessione. Riprova più tardi.');
+            $('#checkout-button').prop('disabled', false).html('Vai al pagamento');
         });
-        
-        return false;
     });
 });
 </script>
