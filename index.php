@@ -1,10 +1,19 @@
 <?php
-// RIMUOVI IL PARAMETRO Stripe-Version SE PRESENTE
-if (isset($_POST['Stripe-Version'])) {
-    unset($_POST['Stripe-Version']);
+// RIMUOVI COMPLETAMENTE IL PARAMETRO Stripe-Version DA TUTTE LE RICHIESTE
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    foreach ($_POST as $key => $value) {
+        if (strtolower($key) === 'stripe-version' || $key === 'Stripe-Version') {
+            unset($_POST[$key]);
+        }
+    }
 }
-if (isset($_GET['Stripe-Version'])) {
-    unset($_GET['Stripe-Version']);
+
+if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    foreach ($_GET as $key => $value) {
+        if (strtolower($key) === 'stripe-version' || $key === 'Stripe-Version') {
+            unset($_GET[$key]);
+        }
+    }
 }
 
 // Debug errori
@@ -383,7 +392,7 @@ $(function() {
         }
     }
     
-    // Gestione checkout - VERSIONE FIXED
+    // Gestione checkout
     $('#checkout-button').click(function() {
         console.log('Checkout button clicked');
         
