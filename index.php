@@ -31,10 +31,6 @@ if (!empty($stripeConfig['secret_key']) && $stripeConfig['secret_key'] !== 'sk_t
     $stripeInitialized = false;
 }
 
-
-// Imposta la chiave segreta Stripe
-\Stripe\Stripe::setApiKey($stripeConfig['secret_key']);
-
 // Connessione al database
 function getConnection($config) {
     $dsn = sprintf(
@@ -57,21 +53,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $pdo = getConnection($db);
 
         switch ($_POST['action']) {
-            case 'get_tables':
-                $tables = $pdo->query("SELECT table_name FROM information_schema.tables WHERE table_schema='public'")
-                              ->fetchAll(PDO::FETCH_COLUMN);
-                echo json_encode(['status' => 'success', 'tables' => $tables]);
-                break;
-
-            case 'get_table_data':
-                $table = $_POST['table'] ?? '';
-                if (!preg_match('/^[a-zA-Z0-9_]+$/', $table)) throw new Exception("Nome tabella non valido");
-
-                $rows = $pdo->query("SELECT * FROM $table LIMIT 100")->fetchAll();
-                $columns = !empty($rows) ? array_keys($rows[0]) : [];
-                echo json_encode(['status' => 'success', 'columns' => $columns, 'rows' => $rows]);
-                break;
-                
             case 'get_products':
                 // Assumendo che esista una tabella 'products' nel database
                 $products = $pdo->query("SELECT * FROM products")->fetchAll();
@@ -146,20 +127,17 @@ $stripeKeysConfigured = !empty($stripeConfig['publishable_key']) && !empty($stri
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <title>PostgreSQL Viewer con Carrello Stripe</title>
+    <title>Carrello Acquisti Stripe</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css" rel="stylesheet">
     <style>
-        .hidden { display: none; }
-        #spinner { display: inline-block; width: 20px; height: 20px; border: 3px solid rgba(255,255,255,.3); border-radius: 50%; border-top-color: #fff; animation: spin 1s ease-in-out infinite; }
-        @keyframes spin { to { transform: rotate(360deg); } }
         .product-card { transition: all 0.3s; }
         .product-card:hover { transform: translateY(-5px); box-shadow: 0 10px 20px rgba(0,0,0,0.1); }
+        .spinner-border { width: 1rem; height: 1rem; }
     </style>
 </head>
 <body>
 <div class="container py-4">
-    <h1 class="mb-4">PostgreSQL Viewer con Carrello Stripe</h1>
+    <h1 class="mb-4">Carrello Acquisti Stripe</h1>
 
     <!-- Stato connessione -->
     <div class="alert <?php echo $connected ? 'alert-success' : 'alert-danger'; ?>">
@@ -177,65 +155,52 @@ $stripeKeysConfigured = !empty($stripeConfig['publishable_key']) && !empty($stri
     </div>
 
     <?php if ($connected): ?>
-    <!-- Selettore tabella -->
-    <div class="mb-3">
-        <label for="tableSelect" class="form-label">Seleziona una tabella:</label>
-        <select id="tableSelect" class="form-select" disabled>
-            <option>Caricamento...</option>
-        </select>
-    </div>
-
-    <!-- Visualizzatore dati -->
-    <div class="table-responsive">
-        <table id="dataTable" class="table table-striped" style="display:none;">
-            <thead></thead>
-            <tbody></tbody>
-        </table>
-    </div>
-    
     <!-- Carrello Stripe -->
-    <div class="mt-5">
-        <h2>Carrello Acquisti</h2>
-        <div id="products-container" class="row mb-4"></div>
+    <div class="row">
+        <div class="col-md-8">
+            <h2>Prodotti Disponibili</h2>
+            <div id="products-container" class="row mb-4"></div>
+        </div>
         
-        <div class="card">
-            <div class="card-header">
-                <h3>Il tuo carrello</h3>
-            </div>
-            <div class="card-body">
-                <table class="table" id="cart-table">
-                    <thead>
-                        <tr>
-                            <th>Prodotto</th>
-                            <th>Prezzo</th>
-                            <th>Quantità</th>
-                            <th>Totale</th>
-                            <th>Azioni</th>
-                        </tr>
-                    </thead>
-                    <tbody id="cart-items">
-                        <tr id="empty-cart">
-                            <td colspan="5" class="text-center">Il carrello è vuoto</td>
-                        </tr>
-                    </tbody>
-                    <tfoot>
-                        <tr>
-                            <td colspan="3" class="text-end"><strong>Totale:</strong></td>
-                            <td id="cart-total">€0.00</td>
-                            <td></td>
-                        </tr>
-                    </tfoot>
-                </table>
-                
-                <!-- Form per email e checkout -->
-                <div id="checkout-section" style="display: none;">
-                    <div class="mb-3">
-                        <label for="customer-email" class="form-label">Email per la ricevuta</label>
-                        <input type="email" class="form-control" id="customer-email" placeholder="Inserisci la tua email">
+        <div class="col-md-4">
+            <div class="card sticky-top" style="top: 20px;">
+                <div class="card-header">
+                    <h3>Il tuo carrello</h3>
+                </div>
+                <div class="card-body">
+                    <table class="table table-sm" id="cart-table">
+                        <thead>
+                            <tr>
+                                <th>Prodotto</th>
+                                <th>Q.tà</th>
+                                <th>Totale</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="cart-items">
+                            <tr id="empty-cart">
+                                <td colspan="4" class="text-center py-3">Il carrello è vuoto</td>
+                            </tr>
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td colspan="2" class="text-end"><strong>Totale:</strong></td>
+                                <td id="cart-total">€0.00</td>
+                                <td></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                    
+                    <!-- Form per email e checkout -->
+                    <div id="checkout-section" style="display: none;">
+                        <div class="mb-3">
+                            <label for="customer-email" class="form-label">Email per la ricevuta</label>
+                            <input type="email" class="form-control" id="customer-email" placeholder="Inserisci la tua email">
+                        </div>
+                        <button id="checkout-button" class="btn btn-success w-100" <?php echo !$stripeKeysConfigured ? 'disabled' : ''; ?>>
+                            <?php echo $stripeKeysConfigured ? 'Vai al pagamento' : 'Configura Stripe prima'; ?>
+                        </button>
                     </div>
-                    <button id="checkout-button" class="btn btn-success" <?php echo !$stripeKeysConfigured ? 'disabled' : ''; ?>>
-                        <?php echo $stripeKeysConfigured ? 'Vai al pagamento' : 'Configura Stripe prima'; ?>
-                    </button>
                 </div>
             </div>
         </div>
@@ -245,15 +210,9 @@ $stripeKeysConfigured = !empty($stripeConfig['publishable_key']) && !empty($stri
 
 <!-- JS -->
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
-<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
-<script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
 <script src="https://js.stripe.com/v3/"></script>
 <script>
 $(function() {
-    const $select = $('#tableSelect');
-    const $table = $('#dataTable');
-    let dt = null;
-    
     // Inizializza Stripe solo se le chiavi sono configurate
     <?php if ($stripeKeysConfigured): ?>
     const stripe = Stripe('<?php echo $stripeConfig['publishable_key']; ?>');
@@ -264,17 +223,6 @@ $(function() {
     
     // Carrello
     let cart = [];
-    
-    // Carica elenco tabelle
-    $.post('', {action: 'get_tables'}, function(res) {
-        if (res.status === 'success') {
-            $select.empty().append('<option value="">-- Seleziona una tabella --</option>');
-            res.tables.forEach(t => $select.append(`<option value="${t}">${t}</option>`));
-            $select.prop('disabled', false);
-        } else {
-            alert(res.message);
-        }
-    });
     
     // Carica prodotti per il carrello
     $.post('', {action: 'get_products'}, function(res) {
@@ -287,31 +235,6 @@ $(function() {
         }
     });
 
-    // Quando viene selezionata una tabella
-    $select.change(function() {
-        const tableName = $(this).val();
-        if (!tableName) return;
-
-        $.post('', {action: 'get_table_data', table: tableName}, function(res) {
-            if (res.status === 'success') {
-                const thead = '<tr>' + res.columns.map(c => `<th>${c}</th>`).join('') + '</tr>';
-                const tbody = res.rows.map(row => {
-                    return '<tr>' + res.columns.map(col =>
-                        `<td>${row[col] !== null ? row[col] : '<em>NULL</em>'}</td>`).join('') + '</tr>';
-                }).join('');
-
-                $table.find('thead').html(thead);
-                $table.find('tbody').html(tbody);
-                $table.show();
-
-                if (dt) dt.destroy();
-                dt = $table.DataTable();
-            } else {
-                alert(res.message);
-            }
-        });
-    });
-    
     // Funzioni per il carrello
     function renderProducts(products) {
         const container = $('#products-container');
@@ -324,7 +247,7 @@ $(function() {
         
         products.forEach(product => {
             const productCard = `
-                <div class="col-md-4 mb-3">
+                <div class="col-lg-4 col-md-6 mb-3">
                     <div class="card product-card h-100">
                         <div class="card-body d-flex flex-column">
                             <h5 class="card-title">${product.name}</h5>
@@ -379,7 +302,7 @@ $(function() {
         cartItems.empty();
         
         if (cart.length === 0) {
-            cartItems.append('<tr id="empty-cart"><td colspan="5" class="text-center">Il carrello è vuoto</td></tr>');
+            cartItems.append('<tr id="empty-cart"><td colspan="4" class="text-center py-3">Il carrello è vuoto</td></tr>');
             checkoutSection.hide();
         } else {
             emptyCart.remove();
@@ -393,9 +316,8 @@ $(function() {
                 const row = `
                     <tr>
                         <td>${item.name}</td>
-                        <td>€${item.price.toFixed(2)}</td>
                         <td>
-                            <div class="input-group input-group-sm" style="width: 100px;">
+                            <div class="input-group input-group-sm" style="width: 90px;">
                                 <button class="btn btn-outline-secondary decrease-quantity" data-id="${item.id}">-</button>
                                 <input type="number" class="form-control text-center quantity-input" value="${item.quantity}" min="1" data-id="${item.id}">
                                 <button class="btn btn-outline-secondary increase-quantity" data-id="${item.id}">+</button>
@@ -404,7 +326,7 @@ $(function() {
                         <td>€${itemTotal.toFixed(2)}</td>
                         <td>
                             <button class="btn btn-sm btn-danger remove-item" data-id="${item.id}">
-                                Rimuovi
+                                &times;
                             </button>
                         </td>
                     </tr>
