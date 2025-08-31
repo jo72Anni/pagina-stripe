@@ -46,9 +46,13 @@ if (!empty($stripeConfig['secret_key']) && $stripeConfig['secret_key'] !== 'sk_t
 // -------------------
 function getDBConnection($config) {
     try {
-        $dsn = "pgsql:host={$config['host']};port={$config['port']};dbname={$config['dbname']};sslmode={$config['ssl_mode']}";
+        $dsn = "pgsql:host={$config['host']};port={$config['port']};dbname={$config['dbname']}";
         
-        // Opzioni aggiuntive per SSL su Render
+        // Aggiungi sslmode al DSN se specificato
+        if (!empty($config['ssl_mode'])) {
+            $dsn .= ";sslmode={$config['ssl_mode']}";
+        }
+        
         $options = [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
@@ -56,15 +60,10 @@ function getDBConnection($config) {
             PDO::ATTR_PERSISTENT => false
         ];
         
-        // Aggiungi opzioni SSL se necessario
-        if ($config['ssl_mode'] === 'require') {
-            $options[PDO::PGSQL_ATTR_SSL_MODE] = PDO::PGSQL_SSL_REQUIRE;
-        }
-        
         $pdo = new PDO($dsn, $config['user'], $config['password'], $options);
         
-        // Test della connessione e della tabella
-        $pdo->query("SELECT 1 FROM pg_tables WHERE tablename = 'products'")->fetch();
+        // Test della connessione
+        $pdo->query("SELECT 1")->fetch();
         
         return $pdo;
     } catch (PDOException $e) {
@@ -73,10 +72,31 @@ function getDBConnection($config) {
 }
 
 // -------------------
+// Verifica esistenza tabella products
+// -------------------
+function checkProductsTable($pdo) {
+    try {
+        // Verifica se la tabella products esiste
+        $tableExists = $pdo->query("
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'products'
+            )
+        ")->fetchColumn();
+        
+        return $tableExists;
+    } catch (PDOException $e) {
+        return false;
+    }
+}
+
+// -------------------
 // Creazione tabella products se non esiste
 // -------------------
 function ensureProductsTable($pdo) {
     try {
+        // Crea la tabella se non esiste
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS products (
                 id SERIAL PRIMARY KEY,
@@ -87,13 +107,15 @@ function ensureProductsTable($pdo) {
             )
         ");
         
-        // Inserisce alcuni prodotti di esempio se la tabella è vuota
+        // Controlla se ci sono prodotti
         $count = $pdo->query("SELECT COUNT(*) FROM products")->fetchColumn();
+        
+        // Inserisce prodotti di esempio se la tabella è vuota
         if ($count == 0) {
             $sampleProducts = [
-                ['name' => 'Prodotto 1', 'description' => 'Descrizione prodotto 1', 'price' => 19.99],
-                ['name' => 'Prodotto 2', 'description' => 'Descrizione prodotto 2', 'price' => 29.99],
-                ['name' => 'Prodotto 3', 'description' => 'Descrizione prodotto 3', 'price' => 39.99]
+                ['name' => 'Prodotto Premium', 'description' => 'Un prodotto di alta qualità', 'price' => 49.99],
+                ['name' => 'Prodotto Standard', 'description' => 'Un prodotto affidabile', 'price' => 29.99],
+                ['name' => 'Prodotto Basic', 'description' => 'Un prodotto essenziale', 'price' => 19.99]
             ];
             
             $stmt = $pdo->prepare("INSERT INTO products (name, description, price) VALUES (?, ?, ?)");
@@ -101,8 +123,10 @@ function ensureProductsTable($pdo) {
                 $stmt->execute([$product['name'], $product['description'], $product['price']]);
             }
         }
+        
+        return true;
     } catch (PDOException $e) {
-        throw new Exception("Errore nella creazione della tabella: " . $e->getMessage());
+        throw new Exception("Errore nella gestione della tabella: " . $e->getMessage());
     }
 }
 
@@ -114,10 +138,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     
     try {
         $pdo = getDBConnection($dbConfig);
-        ensureProductsTable($pdo);
         
         switch ($_POST['action']) {
             case 'get_products':
+                // Verifica e crea la tabella se necessario
+                if (!checkProductsTable($pdo)) {
+                    ensureProductsTable($pdo);
+                }
+                
                 $products = $pdo->query("SELECT * FROM products")->fetchAll();
                 echo json_encode(['status' => 'success', 'products' => $products]);
                 break;
@@ -174,12 +202,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 // -------------------
 try {
     $pdo = getDBConnection($dbConfig);
-    ensureProductsTable($pdo);
     $dbConnected = true;
+    $tableExists = checkProductsTable($pdo);
     $dbError = null;
 } catch (Exception $e) {
     $dbConnected = false;
+    $tableExists = false;
     $dbError = $e->getMessage();
+}
+
+// Crea la tabella se il DB è connesso ma la tabella non esiste
+if ($dbConnected && !$tableExists) {
+    try {
+        ensureProductsTable($pdo);
+        $tableExists = true;
+    } catch (Exception $e) {
+        $dbError = $e->getMessage();
+    }
 }
 
 $stripeConfigured = $stripeInitialized && !empty($stripeConfig['publishable_key']) && 
@@ -187,6 +226,8 @@ $stripeConfigured = $stripeInitialized && !empty($stripeConfig['publishable_key'
 
 // Debug info
 $currentStripeVersion = class_exists('\Stripe\Stripe') ? (\Stripe\Stripe::getApiVersion() ?? 'default') : 'not-set';
+$pdoExtensionLoaded = extension_loaded('pdo');
+$pdoPgSqlExtensionLoaded = extension_loaded('pdo_pgsql');
 ?>
 <!DOCTYPE html>
 <html lang="it">
@@ -213,6 +254,19 @@ $currentStripeVersion = class_exists('\Stripe\Stripe') ? (\Stripe\Stripe::getApi
         top: 10px;
         right: 10px;
     }
+    .extension-status {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        margin-right: 5px;
+    }
+    .extension-loaded {
+        background-color: #28a745;
+    }
+    .extension-missing {
+        background-color: #dc3545;
+    }
 </style>
 </head>
 <body>
@@ -227,12 +281,18 @@ $currentStripeVersion = class_exists('\Stripe\Stripe') ? (\Stripe\Stripe::getApi
         - DB Name: <?php echo htmlspecialchars($dbConfig['dbname']); ?><br>
         - DB User: <?php echo htmlspecialchars($dbConfig['user']); ?><br>
         - SSL Mode: <?php echo htmlspecialchars($dbConfig['ssl_mode']); ?><br>
-        - Stripe Configurato: <?php echo $stripeConfigured ? 'Sì' : 'No'; ?><br>
-        - Render Environment: <?php echo getenv('RENDER') ? 'Sì' : 'No'; ?>
+        - PDO Extension: <span class="extension-status <?= $pdoExtensionLoaded ? 'extension-loaded' : 'extension-missing' ?>"></span><?= $pdoExtensionLoaded ? 'Caricata' : 'Mancante' ?><br>
+        - PDO PostgreSQL: <span class="extension-status <?= $pdoPgSqlExtensionLoaded ? 'extension-loaded' : 'extension-missing' ?>"></span><?= $pdoPgSqlExtensionLoaded ? 'Caricata' : 'Mancante' ?><br>
+        - Tabella Products: <?= $tableExists ? 'Presente' : 'Assente' ?><br>
+        - Stripe Configurato: <?php echo $stripeConfigured ? 'Sì' : 'No'; ?>
     </div>
 
     <div class="alert <?= $dbConnected ? 'alert-success' : 'alert-danger' ?>">
         <?= $dbConnected ? '✅ Database connesso correttamente' : '❌ Errore DB: ' . htmlspecialchars($dbError) ?>
+    </div>
+    
+    <div class="alert <?= $tableExists ? 'alert-success' : 'alert-warning' ?>">
+        <?= $tableExists ? '✅ Tabella products presente' : '⚠️ Tabella products non trovata - Verrà creata automaticamente' ?>
     </div>
     
     <div class="alert <?= $stripeConfigured ? 'alert-success' : 'alert-warning' ?>">
@@ -292,18 +352,21 @@ $currentStripeVersion = class_exists('\Stripe\Stripe') ? (\Stripe\Stripe::getApi
     </div>
     <?php else: ?>
     <div class="alert alert-info">
-        <h4>Risoluzione problemi di connessione su Render:</h4>
+        <h4>Risoluzione problemi di connessione:</h4>
         <ul>
-            <li>Verifica che il database PostgreSQL su Render sia attivo</li>
-            <li>Controlla che le variabili d'ambiente su Render siano corrette</li>
-            <li>Assicurati che la connessione SSL sia configurata correttamente</li>
-            <li>Riavvia il servizio su Render dopo aver modificato le variabili d'ambiente</li>
+            <li>Verifica che l'estensione PDO_PGSQL sia installata sul server</li>
+            <li>Controlla le credenziali del database</li>
+            <li>Assicurati che il database esista e sia accessibile</li>
+            <li>Verifica le impostazioni SSL del database</li>
         </ul>
-        <p class="mt-3">
-            <strong>Configurazione Render consigliata:</strong><br>
-            - DB_SSLMODE: require<br>
-            - STRIPE_API_VERSION: 2025-02-24 (solo versione principale)
-        </p>
+        <?php if (!$pdoPgSqlExtensionLoaded): ?>
+        <div class="alert alert-warning mt-3">
+            <strong>Estensione PDO PostgreSQL mancante:</strong><br>
+            Su Ubuntu/Debian: <code>sudo apt-get install php-pdo-pgsql</code><br>
+            Su CentOS/RHEL: <code>sudo yum install php-pdo-pgsql</code><br>
+            Su Render: aggiungi l'estensione nelle impostazioni del servizio
+        </div>
+        <?php endif; ?>
     </div>
     <?php endif; ?>
 </div>
@@ -335,7 +398,7 @@ function loadProducts() {
                     <div class="card h-100">
                         <div class="card-body d-flex flex-column">
                             <h5 class="card-title">${p.name}</h5>
-                            <p class="card-text flex-grow-1">${p.description || ''}</p>
+                            <p class="card-text flex-grow-1">${p.description || 'Nessuna descrizione'}</p>
                             <p class="card-text fw-bold">€${parseFloat(p.price).toFixed(2)}</p>
                             <button class="btn btn-primary mt-auto add-to-cart" 
                                 data-id="${p.id}" 
