@@ -205,6 +205,11 @@ $stripeKeysConfigured = !empty($stripeConfig['publishable_key']) && !empty($stri
             </div>
         </div>
     </div>
+    <div class="mb-3">
+    <a href="PostgreSQLViewer.php" class="btn btn-outline-secondary">
+        🔎 Apri PostgreSQL Viewer
+    </a>
+</div>
     <?php endif; ?>
 </div>
 
