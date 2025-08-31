@@ -34,7 +34,7 @@ $stripeConfig = [
 // Imposta la chiave segreta Stripe SOLO se è configurata correttamente
 if (!empty($stripeConfig['secret_key']) && $stripeConfig['secret_key'] !== 'sk_test_your_secret_key') {
     \Stripe\Stripe::setApiKey($stripeConfig['secret_key']);
-    \Stripe\Stripe::setApiVersion('2025-01-27.acacia'); // Versione API fissa
+    \Stripe\Stripe::setApiVersion('2025-01-27.acacia');
     $stripeInitialized = true;
 } else {
     $stripeInitialized = false;
@@ -383,43 +383,75 @@ $(function() {
         }
     }
     
-    // Gestione checkout
+    // Gestione checkout - VERSIONE FIXED
     $('#checkout-button').click(function() {
+        console.log('Checkout button clicked');
+        
         <?php if (!$stripeKeysConfigured): ?>
         alert('Stripe non è configurato. Configura le variabili d\'ambiente STRIPE_PUBLISHABLE_KEY e STRIPE_SECRET_KEY');
-        return;
+        return false;
         <?php endif; ?>
         
-        const email = $('#customer-email').val();
+        const email = $('#customer-email').val().trim();
+        console.log('Email:', email);
         
-        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-            alert('Inserisci un indirizzo email valido');
-            return;
+        if (!email) {
+            alert('Inserisci la tua email');
+            return false;
         }
         
-        $(this).prop('disabled', true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...');
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            alert('Inserisci un indirizzo email valido');
+            return false;
+        }
         
-        $.post('', {
-            action: 'create_checkout_session',
-            cart: JSON.stringify(cart),
-            email: email
-        }, function(res) {
-            if (res.status === 'success') {
-                stripe.redirectToCheckout({ sessionId: res.sessionId })
-                    .then(function(result) {
-                        if (result.error) {
-                            alert(result.error.message);
-                            $('#checkout-button').prop('disabled', false).html('Vai al pagamento');
-                        }
-                    });
+        if (cart.length === 0) {
+            alert('Il carrello è vuoto');
+            return false;
+        }
+        
+        const $button = $(this);
+        $button.prop('disabled', true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...');
+        
+        console.log('Sending checkout request...');
+        
+        // Usa fetch invece di $.post per migliore gestione errori
+        fetch('', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+                action: 'create_checkout_session',
+                cart: JSON.stringify(cart),
+                email: email
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log('Server response:', data);
+            
+            if (data.status === 'success') {
+                console.log('Redirecting to Stripe...');
+                return stripe.redirectToCheckout({
+                    sessionId: data.sessionId
+                });
             } else {
-                alert('Errore: ' . res.message);
-                $('#checkout-button').prop('disabled', false).html('Vai al pagamento');
+                throw new Error(data.message || 'Errore del server');
             }
-        }).fail(function() {
-            alert('Errore di connessione. Riprova più tardi.');
-            $('#checkout-button').prop('disabled', false).html('Vai al pagamento');
+        })
+        .then(result => {
+            if (result.error) {
+                throw new Error(result.error.message);
+            }
+        })
+        .catch(error => {
+            console.error('Checkout error:', error);
+            alert('Errore: ' + error.message);
+            $button.prop('disabled', false).html('Vai al pagamento');
         });
+        
+        return false;
     });
 });
 </script>
