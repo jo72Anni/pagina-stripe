@@ -1,116 +1,159 @@
 <?php
-require_once 'vendor/autoload.php';
+// Debug errori (solo sviluppo)
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
 
-// Funzione helper per ottenere variabili d'ambiente con fallback
-function env(string $key, $default = null) {
-    $val = getenv($key);
-    return $val !== false ? $val : $default;
+require_once __DIR__ . '/vendor/autoload.php';
+
+// Configurazione DB
+$db = [
+    'host'     => getenv('DB_HOST'),
+    'port'     => getenv('DB_PORT') ?: 5432,
+    'dbname'   => getenv('DB_NAME'),
+    'user'     => getenv('DB_USER'),
+    'password' => getenv('DB_PASSWORD'),
+    'ssl_mode' => getenv('DB_SSLMODE') ?: 'require'
+];
+
+// Chiavi Stripe
+$stripeSecretKey = getenv('STRIPE_SECRET_KEY');
+$webhookSecret  = getenv('STRIPE_WEBHOOK_SECRET'); // whsec_...
+
+\Stripe\Stripe::setApiKey($stripeSecretKey);
+
+// Connessione DB
+function getConnection($config) {
+    $dsn = sprintf(
+        "pgsql:host=%s;port=%d;dbname=%s;sslmode=%s",
+        $config['host'],
+        $config['port'],
+        $config['dbname'],
+        $config['ssl_mode']
+    );
+    return new PDO($dsn, $config['user'], $config['password'], [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+    ]);
 }
 
-// Prendi DATABASE_URL dalle variabili d'ambiente
-$database_url = env('DATABASE_URL');
-if (!$database_url) {
-    error_log("[STRIPE_WEBHOOK] DATABASE_URL non impostata");
-    http_response_code(500);
-    exit("DATABASE_URL non configurata");
-}
-
-// Parsiamo la DATABASE_URL in componenti
-$dbopts = parse_url($database_url);
-if (!$dbopts) {
-    error_log("[STRIPE_WEBHOOK] DATABASE_URL malformata");
-    http_response_code(500);
-    exit("DATABASE_URL malformata");
-}
-
-$host = $dbopts['host'] ?? null;
-$port = $dbopts['port'] ?? 5432; // porta default PostgreSQL
-$user = $dbopts['user'] ?? null;
-$password = $dbopts['pass'] ?? null;
-$dbname = isset($dbopts['path']) ? ltrim($dbopts['path'], '/') : null;
-
-if (!$host || !$user || !$password || !$dbname) {
-    error_log("[STRIPE_WEBHOOK] DATABASE_URL incompleta");
-    http_response_code(500);
-    exit("DATABASE_URL incompleta");
-}
-
-$conn_string = sprintf(
-    "host=%s port=%d dbname=%s user=%s password=%s sslmode=require",
-    $host, $port, $dbname, $user, $password
-);
-
-$conn = pg_connect($conn_string);
-if (!$conn) {
-    error_log("[STRIPE_WEBHOOK] Errore connessione database: " . pg_last_error());
-    http_response_code(500);
-    exit("Errore connessione database");
-}
-
-// Configura la chiave segreta Stripe
-$stripe_secret_key = env('STRIPE_SECRET_KEY');
-if (!$stripe_secret_key) {
-    error_log("[STRIPE_WEBHOOK] STRIPE_SECRET_KEY non impostata");
-    http_response_code(500);
-    exit("Chiave Stripe non configurata");
-}
-\Stripe\Stripe::setApiKey($stripe_secret_key);
-
-// Recupera il payload e la firma dal webhook Stripe
+// Legge payload e header
 $payload = @file_get_contents('php://input');
 $sig_header = $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '';
-$endpoint_secret = env('STRIPE_WEBHOOK_SECRET');
-if (!$endpoint_secret) {
-    error_log("[STRIPE_WEBHOOK] STRIPE_WEBHOOK_SECRET non impostata");
-    http_response_code(500);
-    exit("Segreto webhook non configurato");
-}
 
 try {
-    $event = \Stripe\Webhook::constructEvent($payload, $sig_header, $endpoint_secret);
-} catch (\UnexpectedValueException | \Stripe\Exception\SignatureVerificationException $e) {
-    error_log("[STRIPE_WEBHOOK] Errore verifica webhook: " . $e->getMessage());
+    $event = \Stripe\Webhook::constructEvent(
+        $payload, $sig_header, $webhookSecret
+    );
+} catch (\UnexpectedValueException $e) {
     http_response_code(400);
-    exit("Firma webhook non valida");
+    exit('Payload non valido');
+} catch (\Stripe\Exception\SignatureVerificationException $e) {
+    http_response_code(400);
+    exit('Firma non valida');
 }
 
-$payment_data = $event->data->object;
-$required_fields = ['id', 'amount', 'currency', 'status'];
-foreach ($required_fields as $field) {
-    if (!isset($payment_data->$field)) {
-        error_log("[STRIPE_WEBHOOK] Manca campo obbligatorio: $field");
-        http_response_code(400);
-        exit("Campo obbligatorio mancante: $field");
+$pdo = getConnection($db);
+
+// Controlla duplicati
+$stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM stripe_events WHERE stripe_event_id = :id");
+$stmtCheck->execute([':id' => $event->id]);
+if ($stmtCheck->fetchColumn() > 0) {
+    http_response_code(200);
+    exit; // Evento già elaborato
+}
+
+// Salva evento
+$stmt = $pdo->prepare("INSERT INTO stripe_events (stripe_event_id, type, data) VALUES (:id, :type, :data)");
+$stmt->execute([
+    ':id' => $event->id,
+    ':type' => $event->type,
+    ':data' => json_encode($event->data->object)
+]);
+
+// Funzione per creare ordine
+function createOrder($pdo, $session) {
+    $pdo->beginTransaction();
+    try {
+        $email = $session->customer_email ?? '';
+        $totalAmount = $session->amount_total ?? 0;
+        $currency = $session->currency ?? 'eur';
+        $status = ($session->payment_status ?? '') === 'paid' ? 'paid' : 'failed';
+
+        $stmtOrder = $pdo->prepare("INSERT INTO orders (email, total_amount, currency, status) VALUES (:email, :total, :currency, :status) RETURNING id");
+        $stmtOrder->execute([
+            ':email' => $email,
+            ':total' => $totalAmount,
+            ':currency' => $currency,
+            ':status' => $status
+        ]);
+        $orderId = $stmtOrder->fetchColumn();
+
+        // Inserisci righe ordine dai line_items se disponibili
+        if (!empty($session->display_items)) {
+            $stmtItem = $pdo->prepare("
+                INSERT INTO order_items (order_id, product_name, unit_price, quantity, total_price)
+                VALUES (:order_id, :product_name, :unit_price, :quantity, :total_price)
+            ");
+            foreach ($session->display_items as $item) {
+                $name = $item['custom']['name'] ?? $item['plan']['nickname'] ?? 'Prodotto';
+                $unitPrice = (int)($item['amount'] ?? 0);
+                $quantity = (int)($item['quantity'] ?? 1);
+                $totalPrice = $unitPrice * $quantity;
+
+                $stmtItem->execute([
+                    ':order_id' => $orderId,
+                    ':product_name' => $name,
+                    ':unit_price' => $unitPrice,
+                    ':quantity' => $quantity,
+                    ':total_price' => $totalPrice
+                ]);
+            }
+        }
+
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        error_log("Errore insert ordine: " . $e->getMessage());
     }
 }
 
-$dati_db = [
-    'stripe_payment_id' => $payment_data->id,
-    'amount'            => $payment_data->amount,
-    'currency'          => $payment_data->currency,
-    'status'            => $payment_data->status,
-    'customer_id'       => $payment_data->customer ?? null,
-    'payment_method'    => $payment_data->payment_method ?? null,
-    'receipt_email'     => $payment_data->receipt_email ?? null,
-    'stripe_created_at' => isset($payment_data->created) ? date('Y-m-d H:i:s', $payment_data->created) : null,
-    'raw_event'         => json_encode($payment_data),
-];
+// Funzione per aggiornare stato ordine
+function updateOrderStatus($pdo, $metadata, $status) {
+    if (empty($metadata['order_id'])) return;
 
-$query = "INSERT INTO stripe_transactions (
-    stripe_payment_id, amount, currency, status, customer_id,
-    payment_method, receipt_email, stripe_created_at, raw_event
-) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9
-)";
+    $stmt = $pdo->prepare("UPDATE orders SET status = :status WHERE id = :id");
+    $stmt->execute([
+        ':status' => $status,
+        ':id' => $metadata['order_id']
+    ]);
+}
 
-$result = pg_query_params($conn, $query, array_values($dati_db));
+// Gestione eventi
+switch ($event->type) {
+    case 'checkout.session.completed':
+        createOrder($pdo, $event->data->object);
+        break;
 
-if (!$result) {
-    error_log("[STRIPE_WEBHOOK] Errore inserimento database: " . pg_last_error($conn));
-    http_response_code(500);
-    exit("Errore inserimento dati");
+    case 'payment_intent.succeeded':
+        $pi = $event->data->object;
+        $metadata = (array)($pi->metadata ?? []);
+        updateOrderStatus($pdo, $metadata, 'paid');
+        break;
+
+    case 'invoice.paid':
+        $invoice = $event->data->object;
+        $metadata = (array)($invoice->metadata ?? []);
+        updateOrderStatus($pdo, $metadata, 'paid');
+        break;
+
+    case 'payment_intent.payment_failed':
+        $pi = $event->data->object;
+        $metadata = (array)($pi->metadata ?? []);
+        updateOrderStatus($pdo, $metadata, 'failed');
+        break;
+
+    // altri eventi se necessario
 }
 
 http_response_code(200);
-error_log("[STRIPE_WEBHOOK] Pagamento {$payment_data->id} registrato con successo");
-pg_close($conn);
