@@ -26,6 +26,7 @@ $stripeConfig = [
 // Imposta la chiave segreta Stripe SOLO se è configurata correttamente
 if (!empty($stripeConfig['secret_key']) && $stripeConfig['secret_key'] !== 'sk_test_your_secret_key') {
     \Stripe\Stripe::setApiKey($stripeConfig['secret_key']);
+    \Stripe\Stripe::setApiVersion('2025-01-27.acacia'); // Versione API fissa
     $stripeInitialized = true;
 } else {
     $stripeInitialized = false;
@@ -54,19 +55,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         switch ($_POST['action']) {
             case 'get_products':
-                // Assumendo che esista una tabella 'products' nel database
                 $products = $pdo->query("SELECT * FROM products")->fetchAll();
                 echo json_encode(['status' => 'success', 'products' => $products]);
                 break;
                 
             case 'create_checkout_session':
-                // Verifica che il carrello non sia vuoto
+                if (!$stripeInitialized) {
+                    throw new Exception("Stripe non configurato correttamente");
+                }
+                
                 $cart = json_decode($_POST['cart'], true);
                 if (empty($cart)) {
                     throw new Exception("Il carrello è vuoto");
                 }
                 
-                // Prepara i line items per Stripe
                 $lineItems = [];
                 foreach ($cart as $item) {
                     $lineItems[] = [
@@ -78,22 +80,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                                     'product_id' => $item['id'],
                                 ],
                             ],
-                            'unit_amount' => (int)($item['price'] * 100), // Stripe richiede amount in centesimi
+                            'unit_amount' => (int)($item['price'] * 100),
                         ],
                         'quantity' => $item['quantity'],
                     ];
                 }
                 
-                // Crea la sessione di checkout
                 $session = \Stripe\Checkout\Session::create([
                     'payment_method_types' => ['card'],
                     'line_items' => $lineItems,
                     'mode' => 'payment',
                     'success_url' => $_SERVER['REQUEST_SCHEME'] . '://' . $_SERVER['HTTP_HOST'] . dirname($_SERVER['PHP_SELF']) . '/success.php?session_id={CHECKOUT_SESSION_ID}',
                     'cancel_url' => $_SERVER['REQUEST_SCHEME'] . '://' . $_SERVER['HTTP_HOST'] . $_SERVER['PHP_SELF'],
-                    'metadata' => [
-                        'customer_email' => $_POST['email'] ?? '',
-                    ],
                     'customer_email' => $_POST['email'] ?? '',
                 ]);
                 
@@ -206,10 +204,10 @@ $stripeKeysConfigured = !empty($stripeConfig['publishable_key']) && !empty($stri
         </div>
     </div>
     <div class="mb-3">
-    <a href="PostgreSQLViewer.php" class="btn btn-outline-secondary">
-        🔎 Apri PostgreSQL Viewer
-    </a>
-</div>
+        <a href="PostgreSQLViewer.php" class="btn btn-outline-secondary">
+            🔎 Apri PostgreSQL Viewer
+        </a>
+    </div>
     <?php endif; ?>
 </div>
 
@@ -235,7 +233,6 @@ $(function() {
             renderProducts(res.products);
         } else {
             console.error('Errore nel caricamento prodotti:', res.message);
-            // Se non ci sono prodotti, mostra un messaggio
             $('#products-container').html('<div class="col-12"><div class="alert alert-info">Nessun prodotto disponibile nel database.</div></div>');
         }
     });
@@ -343,12 +340,11 @@ $(function() {
             cartTotal.text(`€${total.toFixed(2)}`);
             checkoutSection.show();
             
-            // Aggiungi event listener per i pulsanti di rimozione
+            // Aggiungi event listener
             $('.remove-item').click(function() {
                 removeFromCart($(this).data('id'));
             });
             
-            // Aggiungi event listener per aumentare/diminuire quantità
             $('.increase-quantity').click(function() {
                 const productId = $(this).data('id');
                 const item = cart.find(item => item.id === productId);
@@ -388,26 +384,21 @@ $(function() {
         
         const email = $('#customer-email').val();
         
-        // Validazione email
         if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
             alert('Inserisci un indirizzo email valido');
             return;
         }
         
-        // Disabilita il pulsante per evitare click multipli
         $(this).prop('disabled', true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...');
         
-        // Crea la sessione di checkout
         $.post('', {
             action: 'create_checkout_session',
             cart: JSON.stringify(cart),
             email: email
         }, function(res) {
             if (res.status === 'success') {
-                // Reindirizza a Stripe Checkout
                 stripe.redirectToCheckout({ sessionId: res.sessionId })
                     .then(function(result) {
-                        // Se il reindirizzamento fallisce, mostra l'errore
                         if (result.error) {
                             alert(result.error.message);
                             $('#checkout-button').prop('disabled', false).html('Vai al pagamento');
@@ -425,4 +416,4 @@ $(function() {
 });
 </script>
 </body>
-</html>
+</html>>
