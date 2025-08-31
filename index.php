@@ -1,449 +1,221 @@
 <?php
-// Debug errori
+// ========================
+// index.php - Carrello Stripe
+// ========================
+
+// Debug
 ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-// Include l'autoloader di Composer per Stripe
+// Autoload Composer
 require_once __DIR__ . '/vendor/autoload.php';
 
-// Configurazione DB da variabili ambiente o valori di default
-$db = [
-    'host'     => getenv('DB_HOST') ?: 'localhost',
-    'port'     => getenv('DB_PORT') ?: 5432,
-    'dbname'   => getenv('DB_NAME') ?: 'postgres',
-    'user'     => getenv('DB_USER') ?: 'postgres',
+// -------------------
+// Config DB
+// -------------------
+$dbConfig = [
+    'host' => getenv('DB_HOST') ?: 'localhost',
+    'port' => getenv('DB_PORT') ?: 5432,
+    'dbname' => getenv('DB_NAME') ?: 'postgres',
+    'user' => getenv('DB_USER') ?: 'postgres',
     'password' => getenv('DB_PASSWORD') ?: 'password',
     'ssl_mode' => getenv('DB_SSLMODE') ?: 'require'
 ];
 
-// Configurazione Stripe da variabili ambiente o valori di default
+// -------------------
+// Config Stripe
+// -------------------
 $stripeConfig = [
     'publishable_key' => getenv('STRIPE_PUBLISHABLE_KEY') ?: 'pk_test_your_publishable_key',
-    'secret_key' => getenv('STRIPE_SECRET_KEY') ?: 'sk_test_your_secret_key',
-    'api_version' => getenv('STRIPE_API_VERSION') ?: '2025-01-27' // Versione principale, non specifica
+    'secret_key' => getenv('STRIPE_SECRET_KEY') ?: 'sk_test_your_secret_key'
 ];
 
-// DEBUG: Visualizza informazioni sulla versione Stripe
-echo "<!-- Stripe API Version Info: " . \Stripe\Stripe::getApiVersion() . " -->\n";
-
-// Imposta la chiave segreta Stripe SOLO se è configurata correttamente
+$stripeInitialized = false;
 if (!empty($stripeConfig['secret_key']) && $stripeConfig['secret_key'] !== 'sk_test_your_secret_key') {
     \Stripe\Stripe::setApiKey($stripeConfig['secret_key']);
-    
-    // Imposta la versione API solo se specificata e valida (senza suffissi come .acacia)
-    if (!empty($stripeConfig['api_version']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $stripeConfig['api_version'])) {
-        \Stripe\Stripe::setApiVersion($stripeConfig['api_version']);
-    }
-    
     $stripeInitialized = true;
-} else {
-    $stripeInitialized = false;
 }
 
-// Connessione al database
-function getConnection($config) {
-    $dsn = sprintf(
-        "pgsql:host=%s;port=%d;dbname=%s;sslmode=%s",
-        $config['host'],
-        $config['port'],
-        $config['dbname'],
-        $config['ssl_mode']
-    );
+// -------------------
+// Connessione DB
+// -------------------
+function getDBConnection($config){
+    $dsn = "pgsql:host={$config['host']};port={$config['port']};dbname={$config['dbname']};sslmode={$config['ssl_mode']}";
     return new PDO($dsn, $config['user'], $config['password'], [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
     ]);
 }
 
-// Gestione AJAX
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+// -------------------
+// AJAX
+// -------------------
+if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['action'])) {
     header('Content-Type: application/json');
     try {
-        $pdo = getConnection($db);
-
+        $pdo = getDBConnection($dbConfig);
         switch ($_POST['action']) {
             case 'get_products':
-                // Assumendo che esista una tabella 'products' nel database
                 $products = $pdo->query("SELECT * FROM products")->fetchAll();
-                echo json_encode(['status' => 'success', 'products' => $products]);
+                echo json_encode(['status'=>'success','products'=>$products]);
                 break;
-                
+
             case 'create_checkout_session':
-                // Verifica che Stripe sia inizializzato correttamente
-                if (!$stripeInitialized) {
-                    throw new Exception("Stripe non è configurato correttamente");
-                }
-                
-                // Verifica che il carrello non sia vuoto
+                if (!$stripeInitialized) throw new Exception("Stripe non configurato");
+
                 $cart = json_decode($_POST['cart'], true);
-                if (empty($cart)) {
-                    throw new Exception("Il carrello è vuoto");
-                }
-                
-                // Prepara i line items per Stripe
+                if (empty($cart)) throw new Exception("Carrello vuoto");
+
                 $lineItems = [];
-                foreach ($cart as $item) {
+                foreach ($cart as $item){
                     $lineItems[] = [
-                        'price_data' => [
-                            'currency' => 'eur',
-                            'product_data' => [
-                                'name' => $item['name'],
-                                'metadata' => [
-                                    'product_id' => $item['id'],
-                                ],
-                            ],
-                            'unit_amount' => (int)($item['price'] * 100), // Stripe richiede amount in centesimi
+                        'price_data'=>[
+                            'currency'=>'eur',
+                            'product_data'=>['name'=>$item['name']],
+                            'unit_amount'=>(int)($item['price']*100),
                         ],
-                        'quantity' => $item['quantity'],
+                        'quantity'=>$item['quantity']
                     ];
                 }
-                
-                // Crea la sessione di checkout
+
+                $baseUrl = ($_SERVER['REQUEST_SCHEME'] ?? 'https').'://'.$_SERVER['HTTP_HOST'];
                 $session = \Stripe\Checkout\Session::create([
-                    'payment_method_types' => ['card'],
-                    'line_items' => $lineItems,
-                    'mode' => 'payment',
-                    'success_url' => $_SERVER['REQUEST_SCHEME'] . '://' . $_SERVER['HTTP_HOST'] . dirname($_SERVER['PHP_SELF']) . '/success.php?session_id={CHECKOUT_SESSION_ID}',
-                    'cancel_url' => $_SERVER['REQUEST_SCHEME'] . '://' . $_SERVER['HTTP_HOST'] . $_SERVER['PHP_SELF'],
-                    'metadata' => [
-                        'customer_email' => $_POST['email'] ?? '',
-                    ],
-                    'customer_email' => $_POST['email'] ?? '',
+                    'payment_method_types'=>['card'],
+                    'line_items'=>$lineItems,
+                    'mode'=>'payment',
+                    'success_url'=>$baseUrl.'/success.php?session_id={CHECKOUT_SESSION_ID}',
+                    'cancel_url'=>$baseUrl.'/index.php',
+                    'customer_email'=>$_POST['email'] ?? ''
                 ]);
-                
-                echo json_encode([
-                    'status' => 'success', 
-                    'sessionId' => $session->id
-                ]);
+
+                echo json_encode(['status'=>'success','sessionId'=>$session->id]);
                 break;
+
+            default:
+                throw new Exception("Azione non valida");
         }
-    } catch (Exception $e) {
-        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+    } catch (Exception $e){
+        http_response_code(400);
+        echo json_encode(['status'=>'error','message'=>$e->getMessage()]);
     }
     exit;
 }
 
-// Verifica connessione per frontend
-try {
-    $pdo = getConnection($db);
-    $connected = true;
-} catch (Exception $e) {
-    $connected = false;
-    $errorMsg = $e->getMessage();
+// -------------------
+// Frontend
+// -------------------
+try{
+    $pdo = getDBConnection($dbConfig);
+    $dbConnected = true;
+}catch(Exception $e){
+    $dbConnected = false;
+    $dbError = $e->getMessage();
 }
 
-// Verifica chiavi Stripe
-$stripeKeysConfigured = !empty($stripeConfig['publishable_key']) && !empty($stripeConfig['secret_key']) && 
-                       $stripeConfig['publishable_key'] !== 'pk_test_your_publishable_key' && 
-                       $stripeConfig['secret_key'] !== 'sk_test_your_secret_key';
-
-// Informazioni di debug
-$stripeVersion = \Stripe\Stripe::getApiVersion() ?? 'Default (Nessuna versione specificata)';
+$stripeConfigured = $stripeInitialized && !empty($stripeConfig['publishable_key']);
 ?>
 <!DOCTYPE html>
 <html lang="it">
 <head>
-    <meta charset="UTF-8">
-    <title>Carrello Acquisti Stripe</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        .product-card { transition: all 0.3s; }
-        .product-card:hover { transform: translateY(-5px); box-shadow: 0 10px 20px rgba(0,0,0,0.1); }
-        .spinner-border { width: 1rem; height: 1rem; }
-        .debug-info { font-size: 0.9rem; background-color: #f8f9fa; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
-    </style>
+<meta charset="UTF-8">
+<title>Carrello Stripe</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body>
 <div class="container py-4">
-    <h1 class="mb-4">Carrello Acquisti Stripe</h1>
+    <h1 class="mb-4 text-center">🛒 Carrello Stripe</h1>
 
-    <!-- Informazioni di debug -->
-    <div class="debug-info">
-        <strong>Informazioni Stripe:</strong><br>
-        - Versione API: <?php echo htmlspecialchars($stripeVersion); ?><br>
-        - Chiave pubblicabile: <?php echo !empty($stripeConfig['publishable_key']) ? 'Configurata' : 'Non configurata'; ?><br>
-        - Chiave segreta: <?php echo !empty($stripeConfig['secret_key']) && $stripeConfig['secret_key'] !== 'sk_test_your_secret_key' ? 'Configurata' : 'Non configurata'; ?>
+    <div class="alert <?= $dbConnected ? 'alert-success' : 'alert-danger' ?>">
+        <?= $dbConnected ? 'Database connesso' : 'Errore DB: '.htmlspecialchars($dbError) ?>
+    </div>
+    <div class="alert <?= $stripeConfigured ? 'alert-success' : 'alert-warning' ?>">
+        <?= $stripeConfigured ? 'Stripe configurato' : 'Stripe non configurato' ?>
     </div>
 
-    <!-- Stato connessione -->
-    <div class="alert <?php echo $connected ? 'alert-success' : 'alert-danger'; ?>">
-        <?php echo $connected ? '✅ Connesso al database con successo.' : '❌ Errore: ' . htmlspecialchars($errorMsg); ?>
-    </div>
-
-    <!-- Verifica Stripe -->
-    <div class="alert <?php echo $stripeKeysConfigured ? 'alert-success' : 'alert-warning'; ?>">
-        <?php if ($stripeKeysConfigured): ?>
-            ✅ Chiavi Stripe configurate correttamente.
-        <?php else: ?>
-            ⚠️ Chiavi Stripe non configurate. Configura le variabili d'ambiente:<br>
-            <code>STRIPE_PUBLISHABLE_KEY</code> e <code>STRIPE_SECRET_KEY</code>
-        <?php endif; ?>
-    </div>
-
-    <?php if ($connected): ?>
-    <!-- Carrello Stripe -->
     <div class="row">
-        <div class="col-md-8">
-            <h2>Prodotti Disponibili</h2>
-            <div id="products-container" class="row mb-4"></div>
+        <div class="col-lg-8">
+            <h2>Prodotti</h2>
+            <div id="products-container" class="row g-3"></div>
         </div>
-        
-        <div class="col-md-4">
-            <div class="card sticky-top" style="top: 20px;">
-                <div class="card-header">
-                    <h3>Il tuo carrello</h3>
-                </div>
+        <div class="col-lg-4">
+            <div class="card sticky-top" style="top:20px;">
+                <div class="card-header">Il tuo carrello</div>
                 <div class="card-body">
-                    <table class="table table-sm" id="cart-table">
-                        <thead>
-                            <tr>
-                                <th>Prodotto</th>
-                                <th>Q.tà</th>
-                                <th>Totale</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody id="cart-items">
-                            <tr id="empty-cart">
-                                <td colspan="4" class="text-center py-3">Il carrello è vuoto</td>
-                            </tr>
-                        </tbody>
-                        <tfoot>
-                            <tr>
-                                <td colspan="2" class="text-end"><strong>Totale:</strong></td>
-                                <td id="cart-total">€0.00</td>
-                                <td></td>
-                            </tr>
-                        </tfoot>
-                    </table>
-                    
-                    <!-- Form per email e checkout -->
-                    <div id="checkout-section" style="display: none;">
-                        <div class="mb-3">
-                            <label for="customer-email" class="form-label">Email per la ricevuta</label>
-                            <input type="email" class="form-control" id="customer-email" placeholder="Inserisci la tua email">
-                        </div>
-                        <button id="checkout-button" class="btn btn-success w-100" <?php echo !$stripeKeysConfigured ? 'disabled' : ''; ?>>
-                            <?php echo $stripeKeysConfigured ? 'Vai al pagamento' : 'Configura Stripe prima'; ?>
-                        </button>
+                    <div id="cart-empty">Il carrello è vuoto</div>
+                    <div id="cart-content" style="display:none;">
+                        <table class="table table-sm">
+                            <thead><tr><th>Prodotto</th><th>Q.tà</th><th>Prezzo</th><th></th></tr></thead>
+                            <tbody id="cart-items"></tbody>
+                            <tfoot>
+                                <tr><td colspan="2">Totale:</td><td id="cart-total">€0.00</td><td></td></tr>
+                            </tfoot>
+                        </table>
+                        <input type="email" id="customer-email" class="form-control mb-2" placeholder="Email">
+                        <button id="checkout-btn" class="btn btn-success w-100" <?= !$stripeConfigured ? 'disabled' : '' ?>>Vai al pagamento</button>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-    <?php endif; ?>
 </div>
-
-<!-- JS -->
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://js.stripe.com/v3/"></script>
 <script>
-$(function() {
-    // Inizializza Stripe solo se le chiavi sono configurate
-    <?php if ($stripeKeysConfigured): ?>
-    const stripe = Stripe('<?php echo $stripeConfig['publishable_key']; ?>');
-    <?php else: ?>
-    const stripe = null;
-    console.warn('Stripe non configurato. Configura le variabili d\'ambiente STRIPE_PUBLISHABLE_KEY e STRIPE_SECRET_KEY');
-    <?php endif; ?>
-    
-    // Carrello
-    let cart = [];
-    
-    // Carica prodotti per il carrello
-    $.post('', {action: 'get_products'}, function(res) {
-        if (res.status === 'success') {
-            renderProducts(res.products);
-        } else {
-            console.error('Errore nel caricamento prodotti:', res.message);
-            // Se non ci sono prodotti, mostra un messaggio
-            $('#products-container').html('<div class="col-12"><div class="alert alert-info">Nessun prodotto disponibile nel database.</div></div>');
-        }
-    });
+const stripe = <?= $stripeConfigured ? "Stripe('{$stripeConfig['publishable_key']}')" : 'null' ?>;
+let cart=[];
 
-    // Funzioni per il carrello
-    function renderProducts(products) {
-        const container = $('#products-container');
-        container.empty();
-        
-        if (products.length === 0) {
-            container.html('<div class="col-12"><div class="alert alert-info">Nessun prodotto disponibile.</div></div>');
-            return;
-        }
-        
-        products.forEach(product => {
-            const productCard = `
-                <div class="col-lg-4 col-md-6 mb-3">
-                    <div class="card product-card h-100">
-                        <div class="card-body d-flex flex-column">
-                            <h5 class="card-title">${product.name}</h5>
-                            <p class="card-text flex-grow-1">${product.description || 'Nessuna descrizione disponibile'}</p>
-                            <p class="card-text"><strong>Prezzo: €${parseFloat(product.price).toFixed(2)}</strong></p>
-                            <button class="btn btn-primary add-to-cart mt-auto" data-id="${product.id}" data-name="${product.name}" data-price="${product.price}">
-                                Aggiungi al carrello
-                            </button>
-                        </div>
+// Carica prodotti
+$.post('', {action:'get_products'}, function(res){
+    if(res.status==='success'){
+        const container=$('#products-container');
+        res.products.forEach(p=>{
+            container.append(`<div class="col-md-6 col-lg-4 mb-3">
+                <div class="card h-100">
+                    <div class="card-body d-flex flex-column">
+                        <h5>${p.name}</h5>
+                        <p class="flex-grow-1">€${parseFloat(p.price).toFixed(2)}</p>
+                        <button class="btn btn-primary mt-auto add-to-cart" data-id="${p.id}" data-name="${p.name}" data-price="${p.price}">Aggiungi</button>
                     </div>
                 </div>
-            `;
-            container.append(productCard);
+            </div>`);
         });
-        
-        // Aggiungi event listener per i pulsanti
-        $('.add-to-cart').click(function() {
-            const product = {
-                id: $(this).data('id'),
-                name: $(this).data('name'),
-                price: parseFloat($(this).data('price')),
-                quantity: 1
-            };
-            
-            addToCart(product);
+        $('.add-to-cart').click(function(){
+            const p={id:$(this).data('id'),name:$(this).data('name'),price:parseFloat($(this).data('price')),quantity:1};
+            const e=cart.find(i=>i.id===p.id);
+            if(e)e.quantity++; else cart.push(p);
+            updateCart();
         });
     }
-    
-    function addToCart(product) {
-        const existingItem = cart.find(item => item.id === product.id);
-        
-        if (existingItem) {
-            existingItem.quantity += 1;
-        } else {
-            cart.push(product);
-        }
-        
-        updateCart();
-    }
-    
-    function removeFromCart(productId) {
-        cart = cart.filter(item => item.id !== productId);
-        updateCart();
-    }
-    
-    function updateCart() {
-        const cartItems = $('#cart-items');
-        const cartTotal = $('#cart-total');
-        const emptyCart = $('#empty-cart');
-        const checkoutSection = $('#checkout-section');
-        
-        cartItems.empty();
-        
-        if (cart.length === 0) {
-            cartItems.append('<tr id="empty-cart"><td colspan="4" class="text-center py-3">Il carrello è vuoto</td></tr>');
-            checkoutSection.hide();
-        } else {
-            emptyCart.remove();
-            
-            let total = 0;
-            
-            cart.forEach(item => {
-                const itemTotal = item.price * item.quantity;
-                total += itemTotal;
-                
-                const row = `
-                    <tr>
-                        <td>${item.name}</td>
-                        <td>
-                            <div class="input-group input-group-sm" style="width: 90px;">
-                                <button class="btn btn-outline-secondary decrease-quantity" data-id="${item.id}">-</button>
-                                <input type="number" class="form-control text-center quantity-input" value="${item.quantity}" min="1" data-id="${item.id}">
-                                <button class="btn btn-outline-secondary increase-quantity" data-id="${item.id}">+</button>
-                            </div>
-                        </td>
-                        <td>€${itemTotal.toFixed(2)}</td>
-                        <td>
-                            <button class="btn btn-sm btn-danger remove-item" data-id="${item.id}">
-                                &times;
-                            </button>
-                        </td>
-                    </tr>
-                `;
-                
-                cartItems.append(row);
-            });
-            
-            cartTotal.text(`€${total.toFixed(2)}`);
-            checkoutSection.show();
-            
-            // Aggiungi event listener per i pulsanti di rimozione
-            $('.remove-item').click(function() {
-                removeFromCart($(this).data('id'));
-            });
-            
-            // Aggiungi event listener per aumentare/diminuire quantità
-            $('.increase-quantity').click(function() {
-                const productId = $(this).data('id');
-                const item = cart.find(item => item.id === productId);
-                if (item) {
-                    item.quantity += 1;
-                    updateCart();
-                }
-            });
-            
-            $('.decrease-quantity').click(function() {
-                const productId = $(this).data('id');
-                const item = cart.find(item => item.id === productId);
-                if (item && item.quantity > 1) {
-                    item.quantity -= 1;
-                    updateCart();
-                }
-            });
-            
-            $('.quantity-input').change(function() {
-                const productId = $(this).data('id');
-                const quantity = parseInt($(this).val());
-                const item = cart.find(item => item.id === productId);
-                if (item && quantity > 0) {
-                    item.quantity = quantity;
-                    updateCart();
-                }
-            });
-        }
-    }
-    
-    // Gestione checkout
-    $('#checkout-button').click(function() {
-        <?php if (!$stripeKeysConfigured): ?>
-        alert('Stripe non è configurato. Configura le variabili d\'ambiente STRIPE_PUBLISHABLE_KEY e STRIPE_SECRET_KEY');
-        return;
-        <?php endif; ?>
-        
-        const email = $('#customer-email').val();
-        
-        // Validazione email
-        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-            alert('Inserisci un indirizzo email valido');
-            return;
-        }
-        
-        // Disabilita il pulsante per evitare click multipli
-        $(this).prop('disabled', true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...');
-        
-        // Crea la sessione di checkout
-        $.post('', {
-            action: 'create_checkout_session',
-            cart: JSON.stringify(cart),
-            email: email
-        }, function(res) {
-            if (res.status === 'success') {
-                // Reindirizza a Stripe Checkout
-                stripe.redirectToCheckout({ sessionId: res.sessionId })
-                    .then(function(result) {
-                        // Se il reindirizzamento fallisce, mostra l'errore
-                        if (result.error) {
-                            alert(result.error.message);
-                            $('#checkout-button').prop('disabled', false).html('Vai al pagamento');
-                        }
-                    });
-            } else {
-                alert('Errore: ' + res.message);
-                $('#checkout-button').prop('disabled', false).html('Vai al pagamento');
-            }
-        }).fail(function() {
-            alert('Errore di connessione. Riprova più tardi.');
-            $('#checkout-button').prop('disabled', false).html('Vai al pagamento');
-        });
+});
+
+function updateCart(){
+    const $items=$('#cart-items'),$total=$('#cart-total');
+    $items.empty();
+    if(cart.length===0){ $('#cart-empty').show(); $('#cart-content').hide(); return; }
+    $('#cart-empty').hide(); $('#cart-content').show();
+    let total=0;
+    cart.forEach(i=>{
+        const itemTotal=i.price*i.quantity; total+=itemTotal;
+        $items.append(`<tr>
+            <td>${i.name}</td>
+            <td>${i.quantity}</td>
+            <td>€${itemTotal.toFixed(2)}</td>
+            <td><button class="btn btn-sm btn-danger remove-item" data-id="${i.id}">&times;</button></td>
+        </tr>`);
     });
+    $total.text(`€${total.toFixed(2)}`);
+    $('.remove-item').click(function(){ cart=cart.filter(i=>i.id!=$(this).data('id')); updateCart(); });
+}
+
+$('#checkout-btn').click(function(){
+    const email=$('#customer-email').val().trim();
+    if(!email){ alert('Inserisci email'); return; }
+    if(cart.length===0){ alert('Carrello vuoto'); return; }
+    const $btn=$(this); $btn.prop('disabled',true).text('Processing...');
+    $.post('', {action:'create_checkout_session',cart:JSON.stringify(cart),email:email}, function(res){
+        if(res.status==='success'){ stripe.redirectToCheckout({sessionId:res.sessionId}); }
+        else{ alert(res.message); $btn.prop('disabled',false).text('Vai al pagamento'); }
+    }).fail(function(){ alert('Errore di connessione'); $btn.prop('disabled',false).text('Vai al pagamento'); });
 });
 </script>
 </body>
