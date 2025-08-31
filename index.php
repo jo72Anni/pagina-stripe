@@ -20,12 +20,22 @@ $db = [
 // Configurazione Stripe da variabili ambiente o valori di default
 $stripeConfig = [
     'publishable_key' => getenv('STRIPE_PUBLISHABLE_KEY') ?: 'pk_test_your_publishable_key',
-    'secret_key' => getenv('STRIPE_SECRET_KEY') ?: 'sk_test_your_secret_key'
+    'secret_key' => getenv('STRIPE_SECRET_KEY') ?: 'sk_test_your_secret_key',
+    'api_version' => getenv('STRIPE_API_VERSION') ?: '2025-01-27' // Versione principale, non specifica
 ];
+
+// DEBUG: Visualizza informazioni sulla versione Stripe
+echo "<!-- Stripe API Version Info: " . \Stripe\Stripe::getApiVersion() . " -->\n";
 
 // Imposta la chiave segreta Stripe SOLO se è configurata correttamente
 if (!empty($stripeConfig['secret_key']) && $stripeConfig['secret_key'] !== 'sk_test_your_secret_key') {
     \Stripe\Stripe::setApiKey($stripeConfig['secret_key']);
+    
+    // Imposta la versione API solo se specificata e valida (senza suffissi come .acacia)
+    if (!empty($stripeConfig['api_version']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $stripeConfig['api_version'])) {
+        \Stripe\Stripe::setApiVersion($stripeConfig['api_version']);
+    }
+    
     $stripeInitialized = true;
 } else {
     $stripeInitialized = false;
@@ -60,6 +70,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 break;
                 
             case 'create_checkout_session':
+                // Verifica che Stripe sia inizializzato correttamente
+                if (!$stripeInitialized) {
+                    throw new Exception("Stripe non è configurato correttamente");
+                }
+                
                 // Verifica che il carrello non sia vuoto
                 $cart = json_decode($_POST['cart'], true);
                 if (empty($cart)) {
@@ -122,6 +137,9 @@ try {
 $stripeKeysConfigured = !empty($stripeConfig['publishable_key']) && !empty($stripeConfig['secret_key']) && 
                        $stripeConfig['publishable_key'] !== 'pk_test_your_publishable_key' && 
                        $stripeConfig['secret_key'] !== 'sk_test_your_secret_key';
+
+// Informazioni di debug
+$stripeVersion = \Stripe\Stripe::getApiVersion() ?? 'Default (Nessuna versione specificata)';
 ?>
 <!DOCTYPE html>
 <html lang="it">
@@ -133,11 +151,20 @@ $stripeKeysConfigured = !empty($stripeConfig['publishable_key']) && !empty($stri
         .product-card { transition: all 0.3s; }
         .product-card:hover { transform: translateY(-5px); box-shadow: 0 10px 20px rgba(0,0,0,0.1); }
         .spinner-border { width: 1rem; height: 1rem; }
+        .debug-info { font-size: 0.9rem; background-color: #f8f9fa; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
     </style>
 </head>
 <body>
 <div class="container py-4">
     <h1 class="mb-4">Carrello Acquisti Stripe</h1>
+
+    <!-- Informazioni di debug -->
+    <div class="debug-info">
+        <strong>Informazioni Stripe:</strong><br>
+        - Versione API: <?php echo htmlspecialchars($stripeVersion); ?><br>
+        - Chiave pubblicabile: <?php echo !empty($stripeConfig['publishable_key']) ? 'Configurata' : 'Non configurata'; ?><br>
+        - Chiave segreta: <?php echo !empty($stripeConfig['secret_key']) && $stripeConfig['secret_key'] !== 'sk_test_your_secret_key' ? 'Configurata' : 'Non configurata'; ?>
+    </div>
 
     <!-- Stato connessione -->
     <div class="alert <?php echo $connected ? 'alert-success' : 'alert-danger'; ?>">
