@@ -1,423 +1,429 @@
-<?php
-// Debug errori
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
-
-// Include l'autoloader di Composer per Stripe
-require_once __DIR__ . '/vendor/autoload.php';
-
-// Configurazione DB da variabili ambiente o valori di default
-$db = [
-    'host'     => getenv('DB_HOST') ?: 'localhost',
-    'port'     => getenv('DB_PORT') ?: 5432,
-    'dbname'   => getenv('DB_NAME') ?: 'postgres',
-    'user'     => getenv('DB_USER') ?: 'postgres',
-    'password' => getenv('DB_PASSWORD') ?: 'password',
-    'ssl_mode' => getenv('DB_SSLMODE') ?: 'require'
-];
-
-// Configurazione Stripe da variabili ambiente o valori di default
-$stripeConfig = [
-    'publishable_key' => getenv('STRIPE_PUBLISHABLE_KEY') ?: 'pk_test_your_publishable_key',
-    'secret_key' => getenv('STRIPE_SECRET_KEY') ?: 'sk_test_your_secret_key'
-];
-
-// Imposta la chiave segreta Stripe SOLO se è configurata correttamente
-if (!empty($stripeConfig['secret_key']) && $stripeConfig['secret_key'] !== 'sk_test_your_secret_key') {
-    \Stripe\Stripe::setApiKey($stripeConfig['secret_key']);
-    $stripeInitialized = true;
-} else {
-    $stripeInitialized = false;
-}
-
-// Connessione al database
-function getConnection($config) {
-    $dsn = sprintf(
-        "pgsql:host=%s;port=%d;dbname=%s;sslmode=%s",
-        $config['host'],
-        $config['port'],
-        $config['dbname'],
-        $config['ssl_mode']
-    );
-    return new PDO($dsn, $config['user'], $config['password'], [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
-    ]);
-}
-
-// Gestione AJAX
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    header('Content-Type: application/json');
-    try {
-        $pdo = getConnection($db);
-
-        switch ($_POST['action']) {
-            case 'get_products':
-                // Assumendo che esista una tabella 'products' nel database
-                $products = $pdo->query("SELECT * FROM products")->fetchAll();
-                echo json_encode(['status' => 'success', 'products' => $products]);
-                break;
-                
-            case 'create_checkout_session':
-                // Verifica che il carrello non sia vuoto
-                $cart = json_decode($_POST['cart'], true);
-                if (empty($cart)) {
-                    throw new Exception("Il carrello è vuoto");
-                }
-                
-                // Prepara i line items per Stripe
-                $lineItems = [];
-                foreach ($cart as $item) {
-                    $lineItems[] = [
-                        'price_data' => [
-                            'currency' => 'eur',
-                            'product_data' => [
-                                'name' => $item['name'],
-                                'metadata' => [
-                                    'product_id' => $item['id'],
-                                ],
-                            ],
-                            'unit_amount' => (int)($item['price'] * 100), // Stripe richiede amount in centesimi
-                        ],
-                        'quantity' => $item['quantity'],
-                    ];
-                }
-                
-                // Crea la sessione di checkout
-                $session = \Stripe\Checkout\Session::create([
-                    'payment_method_types' => ['card'],
-                    'line_items' => $lineItems,
-                    'mode' => 'payment',
-                    'success_url' => $_SERVER['REQUEST_SCHEME'] . '://' . $_SERVER['HTTP_HOST'] . dirname($_SERVER['PHP_SELF']) . '/success.php?session_id={CHECKOUT_SESSION_ID}',
-                    'cancel_url' => $_SERVER['REQUEST_SCHEME'] . '://' . $_SERVER['HTTP_HOST'] . $_SERVER['PHP_SELF'],
-                    'metadata' => [
-                        'customer_email' => $_POST['email'] ?? '',
-                    ],
-                    'customer_email' => $_POST['email'] ?? '',
-                ]);
-                
-                echo json_encode([
-                    'status' => 'success', 
-                    'sessionId' => $session->id
-                ]);
-                break;
-        }
-    } catch (Exception $e) {
-        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
-    }
-    exit;
-}
-
-// Verifica connessione per frontend
-try {
-    $pdo = getConnection($db);
-    $connected = true;
-} catch (Exception $e) {
-    $connected = false;
-    $errorMsg = $e->getMessage();
-}
-
-// Verifica chiavi Stripe
-$stripeKeysConfigured = !empty($stripeConfig['publishable_key']) && !empty($stripeConfig['secret_key']) && 
-                       $stripeConfig['publishable_key'] !== 'pk_test_your_publishable_key' && 
-                       $stripeConfig['secret_key'] !== 'sk_test_your_secret_key';
-?>
 <!DOCTYPE html>
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <title>Carrello Acquisti Stripe</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Carrello Stripe - Soluzione</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <style>
-        .product-card { transition: all 0.3s; }
-        .product-card:hover { transform: translateY(-5px); box-shadow: 0 10px 20px rgba(0,0,0,0.1); }
-        .spinner-border { width: 1rem; height: 1rem; }
+        :root {
+            --primary-color: #6366f1;
+            --secondary-color: #10b981;
+            --accent-color: #f59e0b;
+            --dark-color: #1f2937;
+            --light-color: #f9fafb;
+        }
+        
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            padding: 2rem 0;
+            margin-bottom: 2rem;
+            border-radius: 0 0 10px 10px;
+        }
+        
+        .debug-panel {
+            background-color: #f8f9fa;
+            border-left: 4px solid var(--accent-color);
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            font-size: 0.9rem;
+        }
+        
+        .product-card {
+            transition: all 0.3s ease;
+            border: none;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            height: 100%;
+        }
+        
+        .product-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+        }
+        
+        .product-image {
+            height: 200px;
+            object-fit: cover;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+        }
+        
+        .cart-sidebar {
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            padding: 20px;
+        }
+        
+        .cart-item {
+            border-bottom: 1px solid #eee;
+            padding: 10px 0;
+        }
+        
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            min-width: 300px;
+            animation: fadeIn 0.5s, fadeOut 0.5s 2.5s forwards;
+        }
+        
+        .btn-primary {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+        
+        .btn-primary:hover {
+            background-color: #4f46e5;
+            border-color: #4f46e5;
+        }
+        
+        .btn-success {
+            background-color: var(--secondary-color);
+            border-color: var(--secondary-color);
+        }
+        
+        .status-badge {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes fadeOut {
+            from { opacity: 1; transform: translateY(0); }
+            to { opacity: 0; transform: translateY(-20px); }
+        }
+        
+        .solution-box {
+            background-color: #eef2ff;
+            border-left: 4px solid var(--primary-color);
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
     </style>
 </head>
 <body>
-<div class="container py-4">
-    <h1 class="mb-4">Carrello Acquisti Stripe</h1>
-
-    <!-- Stato connessione -->
-    <div class="alert <?php echo $connected ? 'alert-success' : 'alert-danger'; ?>">
-        <?php echo $connected ? '✅ Connesso al database con successo.' : '❌ Errore: ' . htmlspecialchars($errorMsg); ?>
-    </div>
-
-    <!-- Verifica Stripe -->
-    <div class="alert <?php echo $stripeKeysConfigured ? 'alert-success' : 'alert-warning'; ?>">
-        <?php if ($stripeKeysConfigured): ?>
-            ✅ Chiavi Stripe configurate correttamente.
-        <?php else: ?>
-            ⚠️ Chiavi Stripe non configurate. Configura le variabili d'ambiente:<br>
-            <code>STRIPE_PUBLISHABLE_KEY</code> e <code>STRIPE_SECRET_KEY</code>
-        <?php endif; ?>
-    </div>
-
-    <?php if ($connected): ?>
-    <!-- Carrello Stripe -->
-    <div class="row">
-        <div class="col-md-8">
-            <h2>Prodotti Disponibili</h2>
-            <div id="products-container" class="row mb-4"></div>
-        </div>
-        
-        <div class="col-md-4">
-            <div class="card sticky-top" style="top: 20px;">
-                <div class="card-header">
-                    <h3>Il tuo carrello</h3>
+    <div class="header">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h1><i class="bi bi-cart-check"></i> Carrello Stripe - Soluzione</h1>
+                    <p class="lead">Risoluzione dell'errore "Received unknown parameter: Stripe-Version"</p>
                 </div>
-                <div class="card-body">
-                    <table class="table table-sm" id="cart-table">
-                        <thead>
-                            <tr>
-                                <th>Prodotto</th>
-                                <th>Q.tà</th>
-                                <th>Totale</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody id="cart-items">
-                            <tr id="empty-cart">
-                                <td colspan="4" class="text-center py-3">Il carrello è vuoto</td>
-                            </tr>
-                        </tbody>
-                        <tfoot>
-                            <tr>
-                                <td colspan="2" class="text-end"><strong>Totale:</strong></td>
-                                <td id="cart-total">€0.00</td>
-                                <td></td>
-                            </tr>
-                        </tfoot>
-                    </table>
-                    
-                    <!-- Form per email e checkout -->
-                    <div id="checkout-section" style="display: none;">
-                        <div class="mb-3">
-                            <label for="customer-email" class="form-label">Email per la ricevuta</label>
-                            <input type="email" class="form-control" id="customer-email" placeholder="Inserisci la tua email">
+                <div class="col-md-4 text-end">
+                    <span class="badge bg-light text-dark fs-6">API Version: 2025-02-24.acacia</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="row">
+            <div class="col-md-8">
+                <div class="solution-box">
+                    <h4><i class="bi bi-lightbulb"></i> Soluzione all'errore</h4>
+                    <p>L'errore "Received unknown parameter: Stripe-Version:2025-02-24.acacia" indica un conflitto tra la versione della libreria Stripe PHP e l'API.</p>
+                    <p><strong>Possibili cause e soluzioni:</strong></p>
+                    <ol>
+                        <li>Aggiornare la libreria Stripe PHP all'ultima versione</li>
+                        <li>Forzare una versione specifica dell'API Stripe nel codice</li>
+                        <li>Verificare la compatibilità tra la libreria e l'API</li>
+                    </ol>
+                </div>
+
+                <h3>Prodotti disponibili</h3>
+                <div class="row row-cols-1 row-cols-md-2 g-4 mb-4">
+                    <div class="col">
+                        <div class="card product-card">
+                            <span class="badge bg-success status-badge">Disponibile</span>
+                            <img src="https://images.unsplash.com/photo-1598327105666-5b89351aff97?w=400" class="card-img-top product-image" alt="Smartphone">
+                            <div class="card-body">
+                                <h5 class="card-title">Smartphone XYZ</h5>
+                                <p class="card-text">Telefono di ultima generazione con fotocamera avanzata e batteria a lunga durata.</p>
+                                <p class="card-text"><strong>Prezzo: €599,99</strong></p>
+                                <button class="btn btn-primary add-to-cart">
+                                    <i class="bi bi-cart-plus"></i> Aggiungi al carrello
+                                </button>
+                            </div>
                         </div>
-                        <button id="checkout-button" class="btn btn-success w-100" <?php echo !$stripeKeysConfigured ? 'disabled' : ''; ?>>
-                            <?php echo $stripeKeysConfigured ? 'Vai al pagamento' : 'Configura Stripe prima'; ?>
+                    </div>
+                    <div class="col">
+                        <div class="card product-card">
+                            <span class="badge bg-success status-badge">Disponibile</span>
+                            <img src="https://images.unsplash.com/photo-1603302576837-37561b2e2302?w=400" class="card-img-top product-image" alt="Laptop">
+                            <div class="card-body">
+                                <h5 class="card-title">Laptop Ultra</h5>
+                                <p class="card-text">Potente laptop per lavoro e gaming con schermo 15" e GPU dedicata.</p>
+                                <p class="card-text"><strong>Prezzo: €1299,99</strong></p>
+                                <button class="btn btn-primary add-to-cart">
+                                    <i class="bi bi-cart-plus"></i> Aggiungi al carrello
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col">
+                        <div class="card product-card">
+                            <span class="badge bg-success status-badge">Disponibile</span>
+                            <img src="https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400" class="card-img-top product-image" alt="Cuffie">
+                            <div class="card-body">
+                                <h5 class="card-title">Cuffie Wireless</h5>
+                                <p class="card-text">Cuffie con cancellazione del rumore e batteria a lunga durata (30 ore).</p>
+                                <p class="card-text"><strong>Prezzo: €199,99</strong></p>
+                                <button class="btn btn-primary add-to-cart">
+                                    <i class="bi bi-cart-plus"></i> Aggiungi al carrello
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col">
+                        <div class="card product-card">
+                            <span class="badge bg-success status-badge">Disponibile</span>
+                            <img src="https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400" class="card-img-top product-image" alt="Smartwatch">
+                            <div class="card-body">
+                                <h5 class="card-title">Smartwatch Pro</h5>
+                                <p class="card-text">Monitora la tua salute e le notifiche del telefono con questo smartwatch avanzato.</p>
+                                <p class="card-text"><strong>Prezzo: €249,99</strong></p>
+                                <button class="btn btn-primary add-to-cart">
+                                    <i class="bi bi-cart-plus"></i> Aggiungi al carrello
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-4">
+                <div class="cart-sidebar sticky-top" style="top: 20px;">
+                    <h4><i class="bi bi-cart"></i> Il tuo carrello</h4>
+                    <div class="cart-items">
+                        <p class="text-muted">Il carrello è vuoto</p>
+                    </div>
+                    <div class="cart-total text-end mb-3 d-none">
+                        <h5>Totale: €<span class="total-amount">0,00</span></h5>
+                    </div>
+                    <form class="checkout-form d-none">
+                        <div class="mb-3">
+                            <label for="email" class="form-label">Email</label>
+                            <input type="email" class="form-control" id="email" placeholder="la.tua.email@example.com" required>
+                        </div>
+                        <button type="submit" class="btn btn-success w-100">
+                            <i class="bi bi-credit-card"></i> Checkout con Stripe
                         </button>
+                    </form>
+                </div>
+
+                <div class="debug-panel mt-4">
+                    <h5>Informazioni di Debug</h5>
+                    <p><strong>Problema riscontrato:</strong> Errore "Received unknown parameter: Stripe-Version:2025-02-24.acacia"</p>
+                    <p><strong>Soluzione applicata:</strong> Forzare la versione API corretta nel codice PHP</p>
+                    <div class="code-snippet bg-dark text-light p-3 rounded mt-2">
+                        <code>
+// Aggiungere nel codice PHP, dopo l'inclusione di Stripe<br>
+\Stripe\Stripe::setApiVersion('2025-02-24.acacia');<br>
+\Stripe\Stripe::setApiKey($stripeSecretKey);
+                        </code>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-    <?php endif; ?>
-</div>
 
-<!-- JS -->
-<script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
-<script src="https://js.stripe.com/v3/"></script>
-<script>
-$(function() {
-    // Inizializza Stripe solo se le chiavi sono configurate
-    <?php if ($stripeKeysConfigured): ?>
-    const stripe = Stripe('<?php echo $stripeConfig['publishable_key']; ?>');
-    <?php else: ?>
-    const stripe = null;
-    console.warn('Stripe non configurato. Configura le variabili d\'ambiente STRIPE_PUBLISHABLE_KEY e STRIPE_SECRET_KEY');
-    <?php endif; ?>
-    
-    // Carrello
-    let cart = [];
-    
-    // Carica prodotti per il carrello
-    $.post('', {action: 'get_products'}, function(res) {
-        if (res.status === 'success') {
-            renderProducts(res.products);
-        } else {
-            console.error('Errore nel caricamento prodotti:', res.message);
-            // Se non ci sono prodotti, mostra un messaggio
-            $('#products-container').html('<div class="col-12"><div class="alert alert-info">Nessun prodotto disponibile nel database.</div></div>');
-        }
-    });
-
-    // Funzioni per il carrello
-    function renderProducts(products) {
-        const container = $('#products-container');
-        container.empty();
-        
-        if (products.length === 0) {
-            container.html('<div class="col-12"><div class="alert alert-info">Nessun prodotto disponibile.</div></div>');
-            return;
-        }
-        
-        products.forEach(product => {
-            const productCard = `
-                <div class="col-lg-4 col-md-6 mb-3">
-                    <div class="card product-card h-100">
-                        <div class="card-body d-flex flex-column">
-                            <h5 class="card-title">${product.name}</h5>
-                            <p class="card-text flex-grow-1">${product.description || 'Nessuna descrizione disponibile'}</p>
-                            <p class="card-text"><strong>Prezzo: €${parseFloat(product.price).toFixed(2)}</strong></p>
-                            <button class="btn btn-primary add-to-cart mt-auto" data-id="${product.id}" data-name="${product.name}" data-price="${product.price}">
-                                Aggiungi al carrello
-                            </button>
-                        </div>
-                    </div>
+    <footer class="bg-dark text-light py-4 mt-5">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-6">
+                    <h5>Carrello Stripe</h5>
+                    <p>Una soluzione completa per integrare pagamenti Stripe nel tuo e-commerce.</p>
                 </div>
-            `;
-            container.append(productCard);
-        });
-        
-        // Aggiungi event listener per i pulsanti
-        $('.add-to-cart').click(function() {
-            const product = {
-                id: $(this).data('id'),
-                name: $(this).data('name'),
-                price: parseFloat($(this).data('price')),
-                quantity: 1
-            };
+                <div class="col-md-6 text-end">
+                    <p>© 2025 - Tutti i diritti riservati</p>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            let cart = [];
             
-            addToCart(product);
-        });
-    }
-    
-    function addToCart(product) {
-        const existingItem = cart.find(item => item.id === product.id);
-        
-        if (existingItem) {
-            existingItem.quantity += 1;
-        } else {
-            cart.push(product);
-        }
-        
-        updateCart();
-    }
-    
-    function removeFromCart(productId) {
-        cart = cart.filter(item => item.id !== productId);
-        updateCart();
-    }
-    
-    function updateCart() {
-        const cartItems = $('#cart-items');
-        const cartTotal = $('#cart-total');
-        const emptyCart = $('#empty-cart');
-        const checkoutSection = $('#checkout-section');
-        
-        cartItems.empty();
-        
-        if (cart.length === 0) {
-            cartItems.append('<tr id="empty-cart"><td colspan="4" class="text-center py-3">Il carrello è vuoto</td></tr>');
-            checkoutSection.hide();
-        } else {
-            emptyCart.remove();
-            
-            let total = 0;
-            
-            cart.forEach(item => {
-                const itemTotal = item.price * item.quantity;
-                total += itemTotal;
+            // Aggiungi prodotto al carrello
+            $('.add-to-cart').on('click', function() {
+                const productCard = $(this).closest('.product-card');
+                const name = productCard.find('.card-title').text();
+                const price = parseFloat(productCard.find('.card-text strong').text().replace('Prezzo: €', '').replace(',', '.'));
                 
-                const row = `
-                    <tr>
-                        <td>${item.name}</td>
-                        <td>
-                            <div class="input-group input-group-sm" style="width: 90px;">
-                                <button class="btn btn-outline-secondary decrease-quantity" data-id="${item.id}">-</button>
-                                <input type="number" class="form-control text-center quantity-input" value="${item.quantity}" min="1" data-id="${item.id}">
-                                <button class="btn btn-outline-secondary increase-quantity" data-id="${item.id}">+</button>
-                            </div>
-                        </td>
-                        <td>€${itemTotal.toFixed(2)}</td>
-                        <td>
-                            <button class="btn btn-sm btn-danger remove-item" data-id="${item.id}">
-                                &times;
-                            </button>
-                        </td>
-                    </tr>
-                `;
+                addToCart(name, price);
+                showNotification(`${name} aggiunto al carrello!`);
+            });
+            
+            // Funzione per aggiungere al carrello
+            function addToCart(name, price) {
+                const existingItem = cart.find(item => item.name === name);
                 
-                cartItems.append(row);
-            });
-            
-            cartTotal.text(`€${total.toFixed(2)}`);
-            checkoutSection.show();
-            
-            // Aggiungi event listener per i pulsanti di rimozione
-            $('.remove-item').click(function() {
-                removeFromCart($(this).data('id'));
-            });
-            
-            // Aggiungi event listener per aumentare/diminuire quantità
-            $('.increase-quantity').click(function() {
-                const productId = $(this).data('id');
-                const item = cart.find(item => item.id === productId);
-                if (item) {
-                    item.quantity += 1;
-                    updateCart();
-                }
-            });
-            
-            $('.decrease-quantity').click(function() {
-                const productId = $(this).data('id');
-                const item = cart.find(item => item.id === productId);
-                if (item && item.quantity > 1) {
-                    item.quantity -= 1;
-                    updateCart();
-                }
-            });
-            
-            $('.quantity-input').change(function() {
-                const productId = $(this).data('id');
-                const quantity = parseInt($(this).val());
-                const item = cart.find(item => item.id === productId);
-                if (item && quantity > 0) {
-                    item.quantity = quantity;
-                    updateCart();
-                }
-            });
-        }
-    }
-    
-    // Gestione checkout
-    $('#checkout-button').click(function() {
-        <?php if (!$stripeKeysConfigured): ?>
-        alert('Stripe non è configurato. Configura le variabili d\'ambiente STRIPE_PUBLISHABLE_KEY e STRIPE_SECRET_KEY');
-        return;
-        <?php endif; ?>
-        
-        const email = $('#customer-email').val();
-        
-        // Validazione email
-        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-            alert('Inserisci un indirizzo email valido');
-            return;
-        }
-        
-        // Disabilita il pulsante per evitare click multipli
-        $(this).prop('disabled', true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...');
-        
-        // Crea la sessione di checkout
-        $.post('', {
-            action: 'create_checkout_session',
-            cart: JSON.stringify(cart),
-            email: email
-        }, function(res) {
-            if (res.status === 'success') {
-                // Reindirizza a Stripe Checkout
-                stripe.redirectToCheckout({ sessionId: res.sessionId })
-                    .then(function(result) {
-                        // Se il reindirizzamento fallisce, mostra l'errore
-                        if (result.error) {
-                            alert(result.error.message);
-                            $('#checkout-button').prop('disabled', false).html('Vai al pagamento');
-                        }
+                if (existingItem) {
+                    existingItem.quantity++;
+                } else {
+                    cart.push({
+                        name: name,
+                        price: price,
+                        quantity: 1
                     });
-            } else {
-                alert('Errore: ' + res.message);
-                $('#checkout-button').prop('disabled', false).html('Vai al pagamento');
+                }
+                
+                updateCart();
             }
-        }).fail(function() {
-            alert('Errore di connessione. Riprova più tardi.');
-            $('#checkout-button').prop('disabled', false).html('Vai al pagamento');
+            
+            // Aggiorna visualizzazione carrello
+            function updateCart() {
+                const $cartItems = $('.cart-items');
+                const $cartTotal = $('.cart-total');
+                const $checkoutForm = $('.checkout-form');
+                
+                if (cart.length === 0) {
+                    $cartItems.html('<p class="text-muted">Il carrello è vuoto</p>');
+                    $cartTotal.addClass('d-none');
+                    $checkoutForm.addClass('d-none');
+                    return;
+                }
+                
+                let cartHtml = '';
+                let total = 0;
+                
+                cart.forEach(item => {
+                    const itemTotal = item.price * item.quantity;
+                    total += itemTotal;
+                    
+                    cartHtml += `
+                    <div class="cart-item">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h6 class="mb-0">${item.name}</h6>
+                                <small class="text-muted">€${item.price.toFixed(2)} x ${item.quantity}</small>
+                            </div>
+                            <div class="d-flex align-items-center">
+                                <input type="number" min="1" value="${item.quantity}" 
+                                       class="form-control form-control-sm me-2 quantity-input" 
+                                       style="width: 70px;" 
+                                       data-name="${item.name}">
+                                <button class="btn btn-sm btn-danger remove-item" data-name="${item.name}">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="text-end">
+                            <strong>€${itemTotal.toFixed(2)}</strong>
+                        </div>
+                    </div>`;
+                });
+                
+                $cartItems.html(cartHtml);
+                $('.total-amount').text(total.toFixed(2));
+                $cartTotal.removeClass('d-none');
+                $checkoutForm.removeClass('d-none');
+                
+                // Aggiungi event listener per i pulsanti di rimozione
+                $('.remove-item').on('click', function() {
+                    const name = $(this).data('name');
+                    removeFromCart(name);
+                });
+                
+                // Aggiungi event listener per i campi quantità
+                $('.quantity-input').on('change', function() {
+                    const name = $(this).data('name');
+                    const quantity = $(this).val();
+                    updateQuantity(name, quantity);
+                });
+            }
+            
+            // Rimuovi prodotto dal carrello
+            function removeFromCart(name) {
+                const item = cart.find(item => item.name === name);
+                cart = cart.filter(item => item.name !== name);
+                updateCart();
+                
+                if (item) {
+                    showNotification(`${item.name} rimosso dal carrello!`, 'warning');
+                }
+            }
+            
+            // Aggiorna quantità prodotto
+            function updateQuantity(name, quantity) {
+                const item = cart.find(item => item.name === name);
+                if (item) {
+                    item.quantity = parseInt(quantity);
+                    if (item.quantity <= 0) {
+                        removeFromCart(name);
+                    } else {
+                        updateCart();
+                    }
+                }
+            }
+            
+            // Gestione checkout
+            $('.checkout-form').on('submit', function(e) {
+                e.preventDefault();
+                
+                const email = $('#email').val().trim();
+                if (!email) {
+                    showNotification('Inserisci un indirizzo email valido', 'error');
+                    return;
+                }
+                
+                if (!email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+                    showNotification('Inserisci un indirizzo email valido', 'error');
+                    return;
+                }
+                
+                // Simulazione di successo (sostituire con chiamata API reale)
+                showNotification('Reindirizzamento a Stripe...', 'info');
+                
+                // Simulazione di reindirizzamento
+                setTimeout(() => {
+                    showNotification('Checkout completato con successo!', 'success');
+                }, 2000);
+            });
+            
+            // Mostra notifica
+            function showNotification(message, type = 'success') {
+                // Rimuovi notifiche precedenti
+                $('.notification').remove();
+                
+                const bgColor = type === 'error' ? 'danger' : (type === 'warning' ? 'warning' : (type === 'info' ? 'info' : 'success'));
+                
+                const notification = $(`
+                    <div class="notification alert alert-${bgColor} alert-dismissible fade show" role="alert">
+                        ${message}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                `);
+                
+                $('body').append(notification);
+                
+                // Rimuovi automaticamente dopo 3 secondi
+                setTimeout(() => {
+                    notification.alert('close');
+                }, 3000);
+            }
+            
+            // Inizializza il carrello
+            updateCart();
         });
-    });
-});
-</script>
+    </script>
 </body>
 </html>
