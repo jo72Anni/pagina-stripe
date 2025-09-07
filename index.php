@@ -26,8 +26,7 @@ $dbConfig = [
     'password' => getenv('DB_PASSWORD') ?: '',
     'ssl_mode' => getenv('DB_SSL_MODE') ?: ''
 ];
-echo 'Stripe publishable key: ' . $stripeConfig['publishable_key'] . '<br>';
-echo 'Stripe secret key: ' . $stripeConfig['secret_key'] . '<br>';
+
 
 $stripeConfig = [
     'publishable_key' => getenv('STRIPE_PUBLISHABLE_KEY') ?: '',
@@ -57,7 +56,8 @@ if (!empty($stripeConfig['secret_key'])) {
 } else {
     error_log('STRIPE_SECRET_KEY vuota: Stripe non inizializzato');
 }
-
+echo 'Stripe publishable key: ' . $stripeConfig['publishable_key'];
+echo 'Stripe secret key: ' . $stripeConfig['secret_key'];
 // -------------------
 // Funzioni DB
 // -------------------
