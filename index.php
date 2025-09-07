@@ -57,12 +57,6 @@ if (!empty($stripeConfig['secret_key'])) {
 }
 
 // -------------------
-// ECHO CHIAVI STRIPE (PER DEBUG) - RIMUOVERE IN PRODUZIONE
-// -------------------
-echo 'Stripe publishable key: ' . $stripeConfig['publishable_key'] . '<br>';
-echo 'Stripe secret key: ' . ($stripeConfig['secret_key'] ? substr($stripeConfig['secret_key'], 0, 8) . '...' : 'non impostata') . '<br>';
-
-// -------------------
 // Funzioni DB
 // -------------------
 function getDBConnection(array $config) {
@@ -102,17 +96,19 @@ function ensureProductsTable(PDO $pdo): void {
             name VARCHAR(255) NOT NULL,
             description TEXT,
             price DECIMAL(10,2) NOT NULL,
+            image_url VARCHAR(500),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )";
         $pdo->exec($create);
         $count = (int)$pdo->query('SELECT COUNT(*) FROM products')->fetchColumn();
         if ($count === 0) {
             $sample = [
-                ['Prodotto 1','Descrizione 1',19.99],
-                ['Prodotto 2','Descrizione 2',29.99],
-                ['Prodotto 3','Descrizione 3',9.99]
+                ['Smartphone XYZ','Telefono di ultima generazione con fotocamera avanzata',599.99,'https://images.unsplash.com/photo-1598327105666-5b89351aff97?w=400'],
+                ['Laptop Ultra','Potente laptop per lavoro e gaming',1299.99,'https://images.unsplash.com/photo-1603302576837-37561b2e2302?w=400'],
+                ['Cuffie Wireless','Cuffie con cancellazione del rumore e batteria a lunga durata',199.99,'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400'],
+                ['Smartwatch Pro','Monitora la tua salute e le notifiche del telefono',249.99,'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400']
             ];
-            $stmt = $pdo->prepare('INSERT INTO products (name, description, price) VALUES (?,?,?)');
+            $stmt = $pdo->prepare('INSERT INTO products (name, description, price, image_url) VALUES (?,?,?,?)');
             foreach($sample as $p){ $stmt->execute($p); }
         }
     } catch (PDOException $e) {
@@ -151,7 +147,7 @@ if($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['action'])){
         switch($action){
             case 'get_products':
                 if(!checkProductsTable($pdo)) ensureProductsTable($pdo);
-                $stmt = $pdo->query('SELECT id,name,description,price,created_at FROM products ORDER BY id');
+                $stmt = $pdo->query('SELECT id,name,description,price,image_url,created_at FROM products ORDER BY id');
                 $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 sendJson(['status'=>'success','products'=>$products],200);
                 break;
@@ -207,12 +203,24 @@ try{
     $pdo=getDBConnection($dbConfig);
     $dbConnected=true;
     $tableExists=checkProductsTable($pdo);
+    if(!$tableExists) ensureProductsTable($pdo);
 }catch(Exception $e){ $dbConnected=false; $tableExists=false; $dbError=$e->getMessage(); }
 
 $stripeConfigured=$stripeInitialized && !empty($stripeConfig['publishable_key']);
 $currentStripeVersion=(class_exists('\\Stripe\\Stripe') && method_exists('\\Stripe\\Stripe','getApiVersion'))?\Stripe\Stripe::getApiVersion():'not-set';
 $pdoExtensionLoaded=extension_loaded('pdo');
 $pdoPgSqlExtensionLoaded=extension_loaded('pdo_pgsql');
+
+// Carica i prodotti dal database per il rendering lato server
+$products = [];
+if ($dbConnected && $tableExists) {
+    try {
+        $stmt = $pdo->query('SELECT id,name,description,price,image_url,created_at FROM products ORDER BY id');
+        $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        error_log('Errore caricamento prodotti: ' . $e->getMessage());
+    }
+}
 ?>
 <!doctype html>
 <html lang="it">
@@ -226,13 +234,22 @@ $pdoPgSqlExtensionLoaded=extension_loaded('pdo_pgsql');
 .debug-info{font-size:.9rem;background:#f8f9fa;padding:10px;border-radius:6px;margin-bottom:15px}
 .cart-item { border-bottom: 1px solid #eee; padding: 10px 0; }
 .cart-total { font-weight: bold; font-size: 1.2rem; margin-top: 15px; }
-.product-card { transition: all 0.3s; }
+.product-card { transition: all 0.3s; height: 100%; }
 .product-card:hover { transform: translateY(-5px); box-shadow: 0 10px 20px rgba(0,0,0,0.1); }
+.product-image { height: 200px; object-fit: cover; }
+.quantity-input { width: 70px; }
+.status-badge { position: absolute; top: 10px; right: 10px; }
+.loading-spinner {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 200px;
+}
 </style>
 </head>
 <body>
 <div class="container py-4">
-<h1 class="mb-4 text-center">🛒 Carrello Stripe - Debug</h1>
+<h1 class="mb-4 text-center">🛒 Carrello Stripe</h1>
 <div class="debug-info">
 <strong>Debug Info:</strong><br>
 - Stripe API Version: <?=htmlspecialchars($currentStripeVersion)?><br>
@@ -251,13 +268,32 @@ $pdoPgSqlExtensionLoaded=extension_loaded('pdo_pgsql');
 <div class="col-md-8">
 <h2>Prodotti disponibili</h2>
 <div id="products-list" class="row row-cols-1 row-cols-md-2 g-4 mb-4">
-<div class="col">
-<div class="card h-100">
-<div class="card-body">
-<h5 class="card-title">Caricamento prodotti...</h5>
-</div>
-</div>
-</div>
+<?php if (!empty($products)): ?>
+    <?php foreach($products as $product): ?>
+    <div class="col">
+        <div class="card h-100 product-card">
+            <?php if (!empty($product['image_url'])): ?>
+            <img src="<?=htmlspecialchars($product['image_url'])?>" class="card-img-top product-image" alt="<?=htmlspecialchars($product['name'])?>">
+            <?php endif; ?>
+            <div class="card-body">
+                <h5 class="card-title"><?=htmlspecialchars($product['name'])?></h5>
+                <p class="card-text"><?=htmlspecialchars($product['description'])?></p>
+                <p class="card-text"><strong>Prezzo: €<?=number_format($product['price'], 2)?></strong></p>
+                <button class="btn btn-primary add-to-cart" 
+                        data-id="<?=htmlspecialchars($product['id'])?>" 
+                        data-name="<?=htmlspecialchars($product['name'])?>" 
+                        data-price="<?=htmlspecialchars($product['price'])?>">
+                    <i class="bi bi-cart-plus"></i> Aggiungi al carrello
+                </button>
+            </div>
+        </div>
+    </div>
+    <?php endforeach; ?>
+<?php else: ?>
+    <div class="col-12">
+        <div class="alert alert-warning">Nessun prodotto disponibile al momento.</div>
+    </div>
+<?php endif; ?>
 </div>
 </div>
 
@@ -297,49 +333,13 @@ $(document).ready(function() {
     let cart = [];
     const stripe = Stripe('<?php echo $stripeConfig['publishable_key']; ?>');
     
-    // Carica i prodotti
-    function loadProducts() {
-        $.post('index.php', {action: 'get_products'}, function(response) {
-            if (response.status === 'success') {
-                renderProducts(response.products);
-            } else {
-                alert('Errore nel caricamento prodotti: ' + response.message);
-            }
-        }).fail(function(xhr, status, error) {
-            alert('Errore di connessione: ' + error);
-        });
-    }
-    
-    // Renderizza i prodotti
-    function renderProducts(products) {
-        const $productsList = $('#products-list');
-        $productsList.empty();
-        
-        products.forEach(product => {
-            const productCard = `
-            <div class="col">
-                <div class="card h-100 product-card">
-                    <div class="card-body">
-                        <h5 class="card-title">${product.name}</h5>
-                        <p class="card-text">${product.description}</p>
-                        <p class="card-text"><strong>Prezzo: €${product.price}</strong></p>
-                        <button class="btn btn-primary add-to-cart" data-id="${product.id}" data-name="${product.name}" data-price="${product.price}">
-                            <i class="bi bi-cart-plus"></i> Aggiungi al carrello
-                        </button>
-                    </div>
-                </div>
-            </div>`;
-            $productsList.append(productCard);
-        });
-        
-        // Aggiungi event listener per i pulsanti
-        $('.add-to-cart').on('click', function() {
-            const id = $(this).data('id');
-            const name = $(this).data('name');
-            const price = $(this).data('price');
-            addToCart(id, name, price);
-        });
-    }
+    // Aggiungi event listener per i pulsanti "Aggiungi al carrello"
+    $('.add-to-cart').on('click', function() {
+        const id = $(this).data('id');
+        const name = $(this).data('name');
+        const price = $(this).data('price');
+        addToCart(id, name, price);
+    });
     
     // Aggiungi prodotto al carrello
     function addToCart(id, name, price) {
@@ -357,12 +357,20 @@ $(document).ready(function() {
         }
         
         updateCart();
+        
+        // Mostra notifica
+        showNotification(`${name} aggiunto al carrello!`);
     }
     
     // Rimuovi prodotto dal carrello
     function removeFromCart(id) {
+        const item = cart.find(item => item.id === id);
         cart = cart.filter(item => item.id !== id);
         updateCart();
+        
+        if (item) {
+            showNotification(`${item.name} rimosso dal carrello!`);
+        }
     }
     
     // Aggiorna quantità prodotto
@@ -408,7 +416,7 @@ $(document).ready(function() {
                     <div class="d-flex align-items-center">
                         <input type="number" min="1" value="${item.quantity}" 
                                class="form-control form-control-sm me-2 quantity-input" 
-                               style="width: 60px;" 
+                               style="width: 70px;" 
                                data-id="${item.id}">
                         <button class="btn btn-sm btn-danger remove-item" data-id="${item.id}">
                             <i class="bi bi-trash"></i>
@@ -446,7 +454,12 @@ $(document).ready(function() {
         
         const email = $('#email').val().trim();
         if (!email) {
-            alert('Inserisci un indirizzo email valido');
+            showNotification('Inserisci un indirizzo email valido', 'error');
+            return;
+        }
+        
+        if (!email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+            showNotification('Inserisci un indirizzo email valido', 'error');
             return;
         }
         
@@ -461,24 +474,42 @@ $(document).ready(function() {
                 stripe.redirectToCheckout({ sessionId: response.sessionId })
                     .then(function(result) {
                         if (result.error) {
-                            alert('Errore durante il redirect a Stripe: ' + result.error.message);
+                            showNotification('Errore durante il redirect a Stripe: ' + result.error.message, 'error');
                             $('#checkout-button').prop('disabled', false).html('Checkout con Stripe');
                         }
                     });
             } else {
-                alert('Errore nella creazione della sessione di checkout: ' + response.message);
+                showNotification('Errore nella creazione della sessione di checkout: ' + response.message, 'error');
                 $('#checkout-button').prop('disabled', false).html('Checkout con Stripe');
             }
         }).fail(function(xhr, status, error) {
-            alert('Errore di connessione: ' + error);
+            showNotification('Errore di connessione: ' + error, 'error');
             $('#checkout-button').prop('disabled', false).html('Checkout con Stripe');
         });
     });
     
-    // Inizializza la pagina
-    loadProducts();
+    // Mostra notifica
+    function showNotification(message, type = 'success') {
+        // Rimuovi notifiche precedenti
+        $('.custom-notification').remove();
+        
+        const notification = $(`
+            <div class="custom-notification alert alert-${type === 'error' ? 'danger' : 'success'} alert-dismissible fade show" 
+                 role="alert" 
+                 style="position: fixed; top: 20px; right: 20px; z-index: 9999; min-width: 300px;">
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        `);
+        
+        $('body').append(notification);
+        
+        // Rimuovi automaticamente dopo 3 secondi
+        setTimeout(() => {
+            notification.alert('close');
+        }, 3000);
+    }
 });
 </script>
 </body>
 </html>
-
