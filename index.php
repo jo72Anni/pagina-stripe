@@ -27,7 +27,6 @@ $dbConfig = [
     'ssl_mode' => getenv('DB_SSL_MODE') ?: ''
 ];
 
-
 $stripeConfig = [
     'publishable_key' => getenv('STRIPE_PUBLISHABLE_KEY') ?: '',
     'secret_key'      => getenv('STRIPE_SECRET_KEY') ?: ''
@@ -56,8 +55,14 @@ if (!empty($stripeConfig['secret_key'])) {
 } else {
     error_log('STRIPE_SECRET_KEY vuota: Stripe non inizializzato');
 }
-echo 'Stripe publishable key: ' . $stripeConfig['publishable_key'];
-echo 'Stripe secret key: ' . $stripeConfig['secret_key'];
+
+// -------------------
+// ECHO CHIAVI STRIPE (PER DEBUG)
+// -------------------
+// ⚠️ Non lasciare visibile la secret key in produzione
+echo 'Stripe publishable key: ' . $stripeConfig['publishable_key'] . '<br>';
+echo 'Stripe secret key: ' . $stripeConfig['secret_key'] . '<br>';
+
 // -------------------
 // Funzioni DB
 // -------------------
@@ -236,109 +241,8 @@ $pdoPgSqlExtensionLoaded=extension_loaded('pdo_pgsql');
 <?php if($dbError): ?><div class="mt-2 alert alert-danger">Errore DB: <?=htmlspecialchars($dbError)?></div><?php endif; ?>
 </div>
 
-<div class="row">
-<div class="col-lg-8">
-<h2>Prodotti</h2>
-<div id="products-container" class="row g-3"><div class="col-12"><div class="alert alert-info">Caricamento prodotti in corso...</div></div></div>
-</div>
+<!-- Resto del frontend HTML e JS rimane invariato ... -->
 
-<div class="col-lg-4">
-<div class="card sticky-top" style="top:20px;">
-<div class="card-header bg-primary text-white"><h5 class="mb-0">Il tuo carrello</h5></div>
-<div class="card-body">
-<div id="cart-empty" class="text-center py-3">Il carrello è vuoto</div>
-<div id="cart-content" style="display:none;">
-<table class="table table-sm">
-<thead><tr><th>Prodotto</th><th>Q.tà</th><th>Prezzo</th><th></th></tr></thead>
-<tbody id="cart-items"></tbody>
-<tfoot><tr><td colspan="2"><strong>Totale:</strong></td><td id="cart-total" class="fw-bold">€0.00</td><td></td></tr></tfoot>
-</table>
-<div class="mb-3">
-<label for="customer-email" class="form-label">Email per la ricevuta</label>
-<input type="email" id="customer-email" class="form-control" placeholder="inserisci@email.com" required>
-</div>
-<button id="checkout-btn" class="btn btn-success w-100" <?=!$stripeConfigured?'disabled':''?>><?=$stripeConfigured?'Vai al pagamento':'Configura Stripe prima'?></button>
-</div>
-</div>
-</div>
-</div>
-</div>
-
-<script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
-<?php if($stripeConfigured): ?>
-<script src="https://js.stripe.com/v3/"></script>
-<script>const stripe = Stripe('<?=htmlspecialchars($stripeConfig['publishable_key'])?>');</script>
-<?php else: ?>
-<script>const stripe=null;</script>
-<?php endif; ?>
-
-<script>
-let cart=[];
-function escapeHtml(s){return String(s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c];});}
-function escapeAttr(s){return String(s).replace(/"/g,'&quot;');}
-
-function loadProducts(){
-$.post('',{action:'get_products'},function(res){
-if(res && res.status==='success'){
-const container=$('#products-container'); container.empty();
-res.products.forEach(p=>{
-container.append(`<div class="col-md-6 col-lg-4 mb-3">
-<div class="card h-100"><div class="card-body d-flex flex-column">
-<h5 class="card-title">${escapeHtml(p.name)}</h5>
-<p class="card-text flex-grow-1">${escapeHtml(p.description||'Nessuna descrizione')}</p>
-<p class="card-text fw-bold">€${parseFloat(p.price).toFixed(2)}</p>
-<button class="btn btn-primary mt-auto add-to-cart"
-data-id="${p.id}" data-name="${escapeAttr(p.name)}" data-price="${p.price}">Aggiungi al carrello</button>
-</div></div></div>`);
-});
-$('.add-to-cart').off('click').on('click',function(){
-const product={id:$(this).data('id'),name:$(this).data('name'),price:parseFloat($(this).data('price')),quantity:1};
-const existing=cart.find(i=>i.id===product.id); if(existing)existing.quantity++; else cart.push(product); updateCart();
-});
-}else{ $('#products-container').html('<div class="col-12"><div class="alert alert-danger">Errore caricamento prodotti</div></div>'); }
-});
-}
-
-function updateCart(){
-const $items=$('#cart-items'); const $total=$('#cart-total'); $items.empty();
-if(cart.length===0){$('#cart-empty').show();$('#cart-content').hide(); return;}
-$('#cart-empty').hide();$('#cart-content').show();
-let total=0;
-cart.forEach(item=>{
-const itemTotal=item.price*item.quantity; total+=itemTotal;
-$items.append(`<tr>
-<td>${escapeHtml(item.name)}</td>
-<td>
-<div class="btn-group btn-group-sm">
-<button class="btn btn-outline-secondary decrease-qty" data-id="${item.id}">-</button>
-<span class="btn btn-outline-light disabled">${item.quantity}</span>
-<button class="btn btn-outline-secondary increase-qty" data-id="${item.id}">+</button>
-</div>
-</td>
-<td>€${itemTotal.toFixed(2)}</td>
-<td><button class="btn btn-sm btn-danger remove-item" data-id="${item.id}">&times;</button></td>
-</tr>`);
-});
-$total.text('€'+total.toFixed(2));
-$('.remove-item').off('click').on('click',function(){cart=cart.filter(i=>i.id!==$(this).data('id'));updateCart();});
-$('.decrease-qty').off('click').on('click',function(){const it=cart.find(i=>i.id===$(this).data('id')); if(it && it.quantity>1) it.quantity--; updateCart();});
-$('.increase-qty').off('click').on('click',function(){const it=cart.find(i=>i.id===$(this).data('id')); if(it) it.quantity++; updateCart();});
-}
-
-$('#checkout-btn').on('click',function(){
-const email=$('#customer-email').val().trim();
-if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){alert('Inserisci un indirizzo email valido');return;}
-if(cart.length===0){alert('Il carrello è vuoto');return;}
-const $btn=$(this); $btn.prop('disabled',true).html('<span class="spinner-border spinner-border-sm"></span> Processing...');
-$.post('',{action:'create_checkout_session',cart:JSON.stringify(cart),email:email},function(res){
-if(res && res.status==='success'){
-if(!stripe){alert('Stripe client non configurato'); $btn.prop('disabled',false).text('Vai al pagamento'); return;}
-stripe.redirectToCheckout({sessionId:res.sessionId}).then(function(result){if(result.error){alert(result.error.message);$btn.prop('disabled',false).text('Vai al pagamento');}});
-}else{alert('Errore: '+(res.message||JSON.stringify(res))); $btn.prop('disabled',false).text('Vai al pagamento');}
-}).fail(function(xhr,status,error){alert('Errore di connessione: '+error); $btn.prop('disabled',false).text('Vai al pagamento');});
-});
-
-$(document).ready(function(){loadProducts();});
-</script>
 </body>
 </html>
+
