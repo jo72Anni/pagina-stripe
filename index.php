@@ -57,11 +57,10 @@ if (!empty($stripeConfig['secret_key'])) {
 }
 
 // -------------------
-// ECHO CHIAVI STRIPE (PER DEBUG)
+// ECHO CHIAVI STRIPE (PER DEBUG) - RIMUOVERE IN PRODUZIONE
 // -------------------
-// ⚠️ Non lasciare visibile la secret key in produzione
 echo 'Stripe publishable key: ' . $stripeConfig['publishable_key'] . '<br>';
-echo 'Stripe secret key: ' . $stripeConfig['secret_key'] . '<br>';
+echo 'Stripe secret key: ' . ($stripeConfig['secret_key'] ? substr($stripeConfig['secret_key'], 0, 8) . '...' : 'non impostata') . '<br>';
 
 // -------------------
 // Funzioni DB
@@ -214,15 +213,22 @@ $stripeConfigured=$stripeInitialized && !empty($stripeConfig['publishable_key'])
 $currentStripeVersion=(class_exists('\\Stripe\\Stripe') && method_exists('\\Stripe\\Stripe','getApiVersion'))?\Stripe\Stripe::getApiVersion():'not-set';
 $pdoExtensionLoaded=extension_loaded('pdo');
 $pdoPgSqlExtensionLoaded=extension_loaded('pdo_pgsql');
-
-?><!doctype html>
+?>
+<!doctype html>
 <html lang="it">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Carrello Stripe - Debug</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-<style>.debug-info{font-size:.9rem;background:#f8f9fa;padding:10px;border-radius:6px;margin-bottom:15px}</style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+<style>
+.debug-info{font-size:.9rem;background:#f8f9fa;padding:10px;border-radius:6px;margin-bottom:15px}
+.cart-item { border-bottom: 1px solid #eee; padding: 10px 0; }
+.cart-total { font-weight: bold; font-size: 1.2rem; margin-top: 15px; }
+.product-card { transition: all 0.3s; }
+.product-card:hover { transform: translateY(-5px); box-shadow: 0 10px 20px rgba(0,0,0,0.1); }
+</style>
 </head>
 <body>
 <div class="container py-4">
@@ -241,8 +247,238 @@ $pdoPgSqlExtensionLoaded=extension_loaded('pdo_pgsql');
 <?php if($dbError): ?><div class="mt-2 alert alert-danger">Errore DB: <?=htmlspecialchars($dbError)?></div><?php endif; ?>
 </div>
 
-<!-- Resto del frontend HTML e JS rimane invariato ... -->
+<div class="row">
+<div class="col-md-8">
+<h2>Prodotti disponibili</h2>
+<div id="products-list" class="row row-cols-1 row-cols-md-2 g-4 mb-4">
+<div class="col">
+<div class="card h-100">
+<div class="card-body">
+<h5 class="card-title">Caricamento prodotti...</h5>
+</div>
+</div>
+</div>
+</div>
+</div>
 
+<div class="col-md-4">
+<div class="sticky-top" style="top: 20px;">
+<div class="card">
+<div class="card-header bg-primary text-white">
+<h5 class="card-title mb-0"><i class="bi bi-cart"></i> Il tuo carrello</h5>
+</div>
+<div class="card-body">
+<div id="cart-items">
+<p class="text-muted">Il carrello è vuoto</p>
+</div>
+<div id="cart-total" class="cart-total text-end mb-3 d-none">
+Totale: €<span id="cart-total-amount">0.00</span>
+</div>
+<form id="checkout-form" class="d-none">
+<div class="mb-3">
+<label for="email" class="form-label">Email</label>
+<input type="email" class="form-control" id="email" placeholder="La tua email" required>
+</div>
+<button type="submit" class="btn btn-success w-100" id="checkout-button">
+Checkout con Stripe
+</button>
+</form>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://js.stripe.com/v3/"></script>
+<script>
+$(document).ready(function() {
+    let cart = [];
+    const stripe = Stripe('<?php echo $stripeConfig['publishable_key']; ?>');
+    
+    // Carica i prodotti
+    function loadProducts() {
+        $.post('index.php', {action: 'get_products'}, function(response) {
+            if (response.status === 'success') {
+                renderProducts(response.products);
+            } else {
+                alert('Errore nel caricamento prodotti: ' + response.message);
+            }
+        }).fail(function(xhr, status, error) {
+            alert('Errore di connessione: ' + error);
+        });
+    }
+    
+    // Renderizza i prodotti
+    function renderProducts(products) {
+        const $productsList = $('#products-list');
+        $productsList.empty();
+        
+        products.forEach(product => {
+            const productCard = `
+            <div class="col">
+                <div class="card h-100 product-card">
+                    <div class="card-body">
+                        <h5 class="card-title">${product.name}</h5>
+                        <p class="card-text">${product.description}</p>
+                        <p class="card-text"><strong>Prezzo: €${product.price}</strong></p>
+                        <button class="btn btn-primary add-to-cart" data-id="${product.id}" data-name="${product.name}" data-price="${product.price}">
+                            <i class="bi bi-cart-plus"></i> Aggiungi al carrello
+                        </button>
+                    </div>
+                </div>
+            </div>`;
+            $productsList.append(productCard);
+        });
+        
+        // Aggiungi event listener per i pulsanti
+        $('.add-to-cart').on('click', function() {
+            const id = $(this).data('id');
+            const name = $(this).data('name');
+            const price = $(this).data('price');
+            addToCart(id, name, price);
+        });
+    }
+    
+    // Aggiungi prodotto al carrello
+    function addToCart(id, name, price) {
+        const existingItem = cart.find(item => item.id === id);
+        
+        if (existingItem) {
+            existingItem.quantity++;
+        } else {
+            cart.push({
+                id: id,
+                name: name,
+                price: price,
+                quantity: 1
+            });
+        }
+        
+        updateCart();
+    }
+    
+    // Rimuovi prodotto dal carrello
+    function removeFromCart(id) {
+        cart = cart.filter(item => item.id !== id);
+        updateCart();
+    }
+    
+    // Aggiorna quantità prodotto
+    function updateQuantity(id, quantity) {
+        const item = cart.find(item => item.id === id);
+        if (item) {
+            item.quantity = parseInt(quantity);
+            if (item.quantity <= 0) {
+                removeFromCart(id);
+            } else {
+                updateCart();
+            }
+        }
+    }
+    
+    // Aggiorna visualizzazione carrello
+    function updateCart() {
+        const $cartItems = $('#cart-items');
+        const $cartTotal = $('#cart-total');
+        const $checkoutForm = $('#checkout-form');
+        
+        if (cart.length === 0) {
+            $cartItems.html('<p class="text-muted">Il carrello è vuoto</p>');
+            $cartTotal.addClass('d-none');
+            $checkoutForm.addClass('d-none');
+            return;
+        }
+        
+        let cartHtml = '';
+        let total = 0;
+        
+        cart.forEach(item => {
+            const itemTotal = item.price * item.quantity;
+            total += itemTotal;
+            
+            cartHtml += `
+            <div class="cart-item">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="mb-0">${item.name}</h6>
+                        <small class="text-muted">€${item.price} x ${item.quantity}</small>
+                    </div>
+                    <div class="d-flex align-items-center">
+                        <input type="number" min="1" value="${item.quantity}" 
+                               class="form-control form-control-sm me-2 quantity-input" 
+                               style="width: 60px;" 
+                               data-id="${item.id}">
+                        <button class="btn btn-sm btn-danger remove-item" data-id="${item.id}">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="text-end">
+                    <strong>€${itemTotal.toFixed(2)}</strong>
+                </div>
+            </div>`;
+        });
+        
+        $cartItems.html(cartHtml);
+        $('#cart-total-amount').text(total.toFixed(2));
+        $cartTotal.removeClass('d-none');
+        $checkoutForm.removeClass('d-none');
+        
+        // Aggiungi event listener per i pulsanti di rimozione
+        $('.remove-item').on('click', function() {
+            const id = $(this).data('id');
+            removeFromCart(id);
+        });
+        
+        // Aggiungi event listener per i campi quantità
+        $('.quantity-input').on('change', function() {
+            const id = $(this).data('id');
+            const quantity = $(this).val();
+            updateQuantity(id, quantity);
+        });
+    }
+    
+    // Gestione checkout
+    $('#checkout-form').on('submit', function(e) {
+        e.preventDefault();
+        
+        const email = $('#email').val().trim();
+        if (!email) {
+            alert('Inserisci un indirizzo email valido');
+            return;
+        }
+        
+        $('#checkout-button').prop('disabled', true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...');
+        
+        $.post('index.php', {
+            action: 'create_checkout_session',
+            cart: JSON.stringify(cart),
+            email: email
+        }, function(response) {
+            if (response.status === 'success') {
+                stripe.redirectToCheckout({ sessionId: response.sessionId })
+                    .then(function(result) {
+                        if (result.error) {
+                            alert('Errore durante il redirect a Stripe: ' + result.error.message);
+                            $('#checkout-button').prop('disabled', false).html('Checkout con Stripe');
+                        }
+                    });
+            } else {
+                alert('Errore nella creazione della sessione di checkout: ' + response.message);
+                $('#checkout-button').prop('disabled', false).html('Checkout con Stripe');
+            }
+        }).fail(function(xhr, status, error) {
+            alert('Errore di connessione: ' + error);
+            $('#checkout-button').prop('disabled', false).html('Checkout con Stripe');
+        });
+    });
+    
+    // Inizializza la pagina
+    loadProducts();
+});
+</script>
 </body>
 </html>
 
