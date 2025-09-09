@@ -5,10 +5,7 @@ require 'vendor/autoload.php';
 $stripeSecretKey = getenv('STRIPE_SECRET_KEY');
 \Stripe\Stripe::setApiKey($stripeSecretKey);
 
-// Imposta la versione API stabile compatibile con Stripe PHP 16.x
-\Stripe\Stripe::setApiVersion('2025-01-27');
-
-// Debug: mostra alcune informazioni utili (puoi rimuoverlo in produzione)
+// Debug: informazioni utili a video (puoi rimuoverle in produzione)
 echo "<h3>Debug informazioni:</h3>";
 echo "PHP Version: " . phpversion() . "<br>";
 $curl_info = curl_version();
@@ -19,7 +16,7 @@ echo "STRIPE_SECRET_KEY? " . ($stripeSecretKey ? 'Sì' : 'No') . "<br>";
 echo "STRIPE_PUBLISHABLE_KEY? " . (getenv('STRIPE_PUBLISHABLE_KEY') ? 'Sì' : 'No') . "<br>";
 echo "STRIPE_WEBHOOK_SECRET? " . (getenv('STRIPE_WEBHOOK_SECRET') ? 'Sì' : 'No') . "<br>";
 
-// Crea sessione Stripe se si clicca sul pulsante
+// Crea sessione Stripe Checkout se si clicca sul pulsante
 if (isset($_POST['checkout'])) {
     $session = \Stripe\Checkout\Session::create([
         'payment_method_types' => ['card'],
@@ -55,4 +52,3 @@ if (isset($_POST['checkout'])) {
   </form>
 </body>
 </html>
-
