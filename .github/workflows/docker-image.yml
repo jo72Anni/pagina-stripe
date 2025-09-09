@@ -1,0 +1,28 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.2'
+        extensions: mbstring, zip, pdo, pgsql
+
+    - name: Install Composer dependencies
+      run: |
+        composer require stripe/stripe-php:^15 --no-interaction --no-update
+        composer install --no-interaction --no-dev --optimize-autoloader
+
+    - name: Build the Docker image
+      run: docker build . --file Dockerfile --tag my-image-name:latest
