@@ -1,9 +1,11 @@
 <?php
 require 'vendor/autoload.php';
 
-\Stripe\Stripe::setApiKey('sk_test_51QtDji2X4PJWtjNB6TPNZV7grmjSKRJvAHzY0ZgxdydwCZPSdQSDYrOsvzaGrejOh9vriE0Di7LQeMajQxJmClWn00FLOQVe6Y');
+// Legge la chiave segreta Stripe dall'ambiente
+$stripeSecretKey = getenv('STRIPE_SECRET_KEY');
+\Stripe\Stripe::setApiKey($stripeSecretKey);
 
-// Creiamo una sessione di checkout con un prodotto d’esempio
+// Creiamo una sessione di checkout
 if (isset($_POST['checkout'])) {
     $session = \Stripe\Checkout\Session::create([
         'payment_method_types' => ['card'],
@@ -13,20 +15,18 @@ if (isset($_POST['checkout'])) {
         'line_items' => [[
             'price_data' => [
                 'currency' => 'eur',
-                'product_data' => [
-                    'name' => 'Maglietta',
-                ],
-                'unit_amount' => 1500, // 15,00€ (in centesimi)
+                'product_data' => ['name' => 'Maglietta'],
+                'unit_amount' => 1500,
             ],
             'quantity' => 1,
         ]],
     ]);
 
-    // Reindirizza l’utente a Stripe Checkout
     header("Location: " . $session->url);
     exit();
 }
 ?>
+
 
 <!DOCTYPE html>
 <html lang="it">
