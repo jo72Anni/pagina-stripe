@@ -1,45 +1,23 @@
 <?php
 require 'vendor/autoload.php';
 
-// Legge la chiave segreta Stripe dall'ambiente
-$stripeSecretKey = getenv('STRIPE_SECRET_KEY');
-\Stripe\Stripe::setApiKey($stripeSecretKey);
+// Mostra la versione PHP
+echo "<h2>PHP Version:</h2>";
+echo phpversion();
 
-// Creiamo una sessione di checkout
-if (isset($_POST['checkout'])) {
-    $session = \Stripe\Checkout\Session::create([
-        'payment_method_types' => ['card'],
-        'mode' => 'payment',
-        'success_url' => 'https://pagina-stripe-08kd.onrender.com/success.php?session_id={CHECKOUT_SESSION_ID}',
-        'cancel_url' => 'https://pagina-stripe-08kd.onrender.com/cancel.php',
-        'line_items' => [[
-            'price_data' => [
-                'currency' => 'eur',
-                'product_data' => ['name' => 'Maglietta'],
-                'unit_amount' => 1500,
-            ],
-            'quantity' => 1,
-        ]],
-    ]);
+// Mostra versione cURL
+echo "<h2>cURL Version:</h2>";
+$curl_info = curl_version();
+echo "cURL: " . $curl_info['version'] . "<br>";
+echo "SSL: " . $curl_info['ssl_version'] . "<br>";
 
-    header("Location: " . $session->url);
-    exit();
-}
+// Mostra versione Stripe PHP
+echo "<h2>Stripe PHP Version:</h2>";
+echo \Stripe\Stripe::VERSION;
+
+// Mostra environment variables (senza stampare le chiavi segrete!)
+echo "<h2>Environment Variables:</h2>";
+echo "STRIPE_SECRET_KEY? " . (getenv('STRIPE_SECRET_KEY') ? 'Set' : 'Non impostata') . "<br>";
+echo "STRIPE_PUBLISHABLE_KEY? " . (getenv('STRIPE_PUBLISHABLE_KEY') ? 'Set' : 'Non impostata') . "<br>";
+echo "STRIPE_WEBHOOK_SECRET? " . (getenv('STRIPE_WEBHOOK_SECRET') ? 'Set' : 'Non impostata') . "<br>";
 ?>
-
-
-<!DOCTYPE html>
-<html lang="it">
-<head>
-  <meta charset="UTF-8">
-  <title>Carrello Stripe</title>
-</head>
-<body>
-  <h1>Carrello 2</h1>
-  <p>Prodotto: Maglietta - 15,00€</p>
-  <form method="POST">
-    <button type="submit" name="checkout">Procedi al pagamento</button>
-  </form>
-</body>
-</html>
-
