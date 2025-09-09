@@ -35,7 +35,7 @@ if (isset($_POST['checkout'])) {
   <title>Carrello Stripe</title>
 </head>
 <body>
-  <h1>Carrello</h1>
+  <h1>Carrello 2</h1>
   <p>Prodotto: Maglietta - 15,00€</p>
   <form method="POST">
     <button type="submit" name="checkout">Procedi al pagamento</button>
