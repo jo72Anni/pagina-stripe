@@ -19,8 +19,12 @@ COPY . /var/www/html/
 # Imposta i permessi
 RUN chown -R www-data:www-data /var/www/html
 
-# Esponi la porta 80
-EXPOSE 80
+# ESPONI LA PORTA 4242 (QUESTA È LA MODIFICA IMPORTANTE)
+EXPOSE 4242
+
+# Configura Apache per ascoltare sulla porta 4242
+RUN echo "Listen 4242" > /etc/apache2/ports.conf
+RUN sed -i 's/<VirtualHost \*:80>/<VirtualHost \*:4242>/g' /etc/apache2/sites-available/000-default.conf
 
 # Avvia Apache
 CMD ["apache2-foreground"]
