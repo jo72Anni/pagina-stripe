@@ -1,30 +1,28 @@
-# Usa l'immagine ufficiale di PHP con Apache
 FROM php:8.2-apache
 
-# Installa le dipendenze di sistema
+# Installa Composer e dipendenze sistema
 RUN apt-get update && apt-get install -y \
     git \
     unzip \
-    libzip-dev \
-    libpng-dev \
-    libonig-dev \
-    && docker-php-ext-install pdo_mysql mbstring zip gd
+    curl
 
-# Abilita il mod_rewrite di Apache
-RUN a2enmod rewrite
+# Installa Composer
+RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
-# Copia i file dell'applicazione
+# Copia i file
 COPY . /var/www/html/
 
-# Imposta i permessi
-RUN chown -R www-data:www-data /var/www/html
+# Installa le dipendenze (questo crea vendor/)
+RUN composer install --no-dev --optimize-autoloader
 
-# ESPONI LA PORTA 4242 (QUESTA È LA MODIFICA IMPORTANTE)
-EXPOSE 4242
-
-# Configura Apache per ascoltare sulla porta 4242
-RUN echo "Listen 4242" > /etc/apache2/ports.conf
+# 👇 CAMBIA LA PORTA DA 80 A 4242
+RUN sed -i 's/Listen 80/Listen 4242/g' /etc/apache2/ports.conf
 RUN sed -i 's/<VirtualHost \*:80>/<VirtualHost \*:4242>/g' /etc/apache2/sites-available/000-default.conf
 
-# Avvia Apache
+# Imposta permessi
+RUN chown -R www-data:www-data /var/www/html
+
+# 👇 ESPONI LA PORTA 4242
+EXPOSE 4242
+
 CMD ["apache2-foreground"]
