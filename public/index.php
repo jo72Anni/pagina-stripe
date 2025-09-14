@@ -26,7 +26,6 @@ try {
         $dbUser,
         $dbPass
     );
-    
     $dbh->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
     // Crea tabella se non esiste
@@ -54,8 +53,10 @@ try {
     // ==================== STRIPE ====================
     $stripeSecret = $_ENV['STRIPE_SECRET_KEY'] ?? getenv('STRIPE_SECRET_KEY');
     Stripe::setApiKey($stripeSecret);
+    Stripe::setApiVersion('2024-06-20'); // versione stabile consigliata
 
     $checkoutSession = Session::create([
+        'payment_method_types' => ['card'],
         'line_items' => [[
             'price_data' => [
                 'currency' => 'eur',
@@ -76,32 +77,6 @@ try {
         ]
     ]);
 
-    // ==================== SYSTEM INFO ====================
-    $systemInfo = [
-        'server' => [
-            'php_version' => PHP_VERSION,
-            'server_software' => $_SERVER['SERVER_SOFTWARE'] ?? 'N/A',
-            'server_name' => $_SERVER['SERVER_NAME'] ?? 'N/A',
-            'request_time' => date('Y-m-d H:i:s', $_SERVER['REQUEST_TIME'] ?? time())
-        ],
-        'database' => [
-            'driver' => $dbh->getAttribute(PDO::ATTR_DRIVER_NAME),
-            'version' => $dbh->getAttribute(PDO::ATTR_SERVER_VERSION),
-            'connection_status' => $dbh->getAttribute(PDO::ATTR_CONNECTION_STATUS)
-        ],
-        'request' => [
-            'method' => $_SERVER['REQUEST_METHOD'] ?? 'N/A',
-            'uri' => $_SERVER['REQUEST_URI'] ?? 'N/A',
-            'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'N/A',
-            'accept_language' => $_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? 'N/A'
-        ],
-        'stripe' => [
-            'api_version' => '2024-06-20',
-            'checkout_session_id' => $checkoutSession->id,
-            'payment_status' => $checkoutSession->payment_status
-        ]
-    ];
-
     // ==================== RESPONSE ====================
     echo json_encode([
         'status' => 'success',
@@ -117,7 +92,6 @@ try {
             'session_id' => $checkoutSession->id,
             'expires_at' => date('Y-m-d H:i:s', $checkoutSession->expires_at)
         ],
-        'system' => $systemInfo,
         'timestamp' => date('Y-m-d H:i:s'),
         'environment' => $_ENV['APP_ENV'] ?? getenv('APP_ENV') ?? 'production'
     ]);
@@ -127,11 +101,7 @@ try {
     echo json_encode([
         'status' => 'database_error',
         'message' => 'Database connection failed',
-        'error' => $e->getMessage(),
-        'system_info' => [
-            'php_version' => PHP_VERSION,
-            'server' => $_SERVER['SERVER_SOFTWARE'] ?? 'N/A'
-        ]
+        'error' => $e->getMessage()
     ]);
 } catch (\Stripe\Exception\ApiErrorException $e) {
     http_response_code(500);
