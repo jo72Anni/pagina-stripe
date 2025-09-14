@@ -1,0 +1,32 @@
+{
+    "name": "tuo-progetto/stripe-pgsql",
+    "description": "App con pagamenti Stripe e PostgreSQL",
+    "type": "project",
+    "require": {
+        "php": "^8.0",
+        "stripe/stripe-php": "^17.6",
+        "ext-pdo_pgsql": "*",
+        "ext-json": "*",
+        "vlucas/phpdotenv": "^5.5",
+        "monolog/monolog": "^2.8"
+    },
+    "require-dev": {
+        "squizlabs/php_codesniffer": "^3.7",
+        "phpunit/phpunit": "^9.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "check-style": "phpcs -p --standard=PSR12 src/ tests/",
+        "fix-style": "phpcbf -p --standard=PSR12 src/ tests/"
+    }
+}

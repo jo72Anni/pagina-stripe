@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: stripe-pgsql-app
+    env: docker
+    dockerfilePath: Dockerfile
+    plan: free
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: STRIPE_SECRET_KEY
+        fromSecret: stripe_secret_key
+      - key: STRIPE_PUBLISHABLE_KEY
+        fromSecret: stripe_publishable_key
+    database:
+      name: postgres
+      databaseName: myapp
+      user: myapp_user
+
+databases:
+  - name: postgres
+    databaseName: myapp
+    user: myapp_user
+    plan: free
