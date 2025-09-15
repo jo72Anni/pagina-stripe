@@ -1,20 +1,18 @@
 <?php
-// public/index.php
 require __DIR__ . '/../vendor/autoload.php';
 
 use Stripe\Stripe;
 use Stripe\Checkout\Session;
+use Dotenv\Dotenv;
 
-// Carica variabili d'ambiente solo per sviluppo locale
 if (file_exists(__DIR__ . '/../.env')) {
-    $dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/../');
+    $dotenv = Dotenv::createImmutable(__DIR__ . '/../');
     $dotenv->load();
 }
 
 header('Content-Type: application/json');
 
 try {
-    // ==================== DATABASE ====================
     $dbHost = $_ENV['DB_HOST'] ?? getenv('DB_HOST');
     $dbPort = $_ENV['DB_PORT'] ?? getenv('DB_PORT');
     $dbName = $_ENV['DB_NAME'] ?? getenv('DB_NAME');
@@ -27,8 +25,6 @@ try {
         $dbPass
     );
     $dbh->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-
-    // Crea tabella se non esiste
     $dbh->exec("CREATE TABLE IF NOT EXISTS products (
         id SERIAL PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
@@ -38,10 +34,9 @@ try {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )");
 
-    // Inserisci prodotto demo
-    $stmt = $dbh->prepare("INSERT INTO products (name, price, description) 
+    $stmt = $dbh->prepare("INSERT INTO products (name, price, description)
                           VALUES (:name, :price, :description)
-                          ON CONFLICT DO NOTHING 
+                          ON CONFLICT DO NOTHING
                           RETURNING id, name, price");
     $stmt->execute([
         ':name' => 'Premium Software License',
@@ -50,10 +45,13 @@ try {
     ]);
     $product = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    // ==================== STRIPE ====================
+    if (!$product) {
+        $product = $dbh->query("SELECT id, name, price FROM products LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    }
+
     $stripeSecret = $_ENV['STRIPE_SECRET_KEY'] ?? getenv('STRIPE_SECRET_KEY');
     Stripe::setApiKey($stripeSecret);
-    Stripe::setApiVersion('2024-06-20'); // versione stabile consigliata
+    Stripe::setApiVersion('2024-06-20');
 
     $checkoutSession = Session::create([
         'payment_method_types' => ['card'],
@@ -77,7 +75,6 @@ try {
         ]
     ]);
 
-    // ==================== RESPONSE ====================
     echo json_encode([
         'status' => 'success',
         'message' => 'System is fully operational',

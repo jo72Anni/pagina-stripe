@@ -1,5 +1,8 @@
-/vendor
+/vendor/
 /.env
-/node_modules
+*.log
+*.cache
+*.tmp
 .DS_Store
 Thumbs.db
+
