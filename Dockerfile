@@ -26,8 +26,8 @@ RUN composer install --no-dev --no-interaction --optimize-autoloader
 # Copia tutto il resto del progetto
 COPY . /var/www/html/
 
-# Imposta i permessi appropriati
-RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
+# Imposta i permessi generali (opzionale, ma utile)
+RUN chown -R www-data:www-data /var/www/html
 
 # Espone la porta 80
 EXPOSE 80
