@@ -1,12 +1,12 @@
 # Usa immagine base PHP con Apache
 FROM php:8.2-apache
 
-# Installa le dipendenze di sistema
+# Installa le dipendenze di sistema (PER STRIPE + POSTGRES)
 RUN apt-get update && apt-get install -y \
     libpq-dev \
     git \
     unzip \
-    && docker-php-ext-install pdo pdo_pgsql \
+    && docker-php-ext-install pdo pdo_pgsql curl mbstring \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -19,14 +19,14 @@ RUN a2enmod rewrite
 # Copia PRIMA solo i file di Composer (per caching)
 COPY composer.json composer.lock* /var/www/html/
 
-# Installa le dipendenze Composer
+# Installa le dipendenze Composer (Stripe + dotenv)
 WORKDIR /var/www/html/
 RUN composer install --no-dev --no-interaction --optimize-autoloader
 
 # Copia tutto il resto del progetto
 COPY . /var/www/html/
 
-# Imposta i permessi generali (opzionale, ma utile)
+# Imposta i permessi generali
 RUN chown -R www-data:www-data /var/www/html
 
 # Espone la porta 80
