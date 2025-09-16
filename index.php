@@ -6,10 +6,17 @@ require_once __DIR__ . '/vendor/autoload.php';
 $stripeSecretKey = getenv('STRIPE_SECRET_KEY');
 $stripePublishableKey = getenv('STRIPE_PUBLISHABLE_KEY');
 
-// Configura Stripe API key globalmente (una volta sola)
-if ($stripeSecretKey && $stripePublishableKey) {
-    \Stripe\Stripe::setApiKey($stripeSecretKey);
+// ✅ DEBUG CRUCIALE - controlla se le variabili sono caricate
+error_log("Stripe Secret Key: " . ($stripeSecretKey ? 'PRESENTE' : 'ASSENTE'));
+error_log("Stripe Publishable Key: " . ($stripePublishableKey ? 'PRESENTE' : 'ASSENTE'));
+
+// ✅ FERMA TUTTO se manca la chiave segreta
+if (!$stripeSecretKey) {
+    die("ERRORE CRITICO: STRIPE_SECRET_KEY non configurata su Render. Controlla le Environment Variables.");
 }
+
+// ✅ Configura Stripe API key GLOBALMENTE (SOLO UNA VOLTA)
+\Stripe\Stripe::setApiKey($stripeSecretKey);
 
 // Database
 $pdo = require __DIR__ . '/db.php';
@@ -33,15 +40,18 @@ $stripeError = null;
 
 if ($stripeSecretKey && $stripePublishableKey) {
     try {
-        // ✅ Versione ottimizzata - senza duplicazione API key
+        // ✅ Versione CORRETTA - senza passare api_key nel secondo parametro
         $paymentIntent = \Stripe\PaymentIntent::create([
             'amount' => 1999,
             'currency' => 'eur',
             'automatic_payment_methods' => ['enabled' => true]
         ]);
+        
+        error_log("PaymentIntent creato con successo: " . $paymentIntent->id);
+        
     } catch (Exception $e) {
         $stripeError = $e->getMessage();
-        error_log("Stripe Error: " . $e->getMessage()); // ✅ Debug sicuro
+        error_log("Errore Stripe: " . $e->getMessage());
     }
 }
 ?>
@@ -70,29 +80,14 @@ if ($stripeSecretKey && $stripePublishableKey) {
         <li><strong>Database:</strong> <?= htmlspecialchars(getenv('DB_NAME')) ?></li>
     </ul>
 
-    <h2>Tabelle presenti</h2>
-    <?php if (empty($tables)): ?>
-        <p>Nessuna tabella trovata.</p>
-    <?php else: ?>
-        <table>
-            <tr><th>#</th><th>Nome Tabella</th></tr>
-            <?php foreach ($tables as $i => $t): ?>
-                <tr>
-                    <td><?= $i+1 ?></td>
-                    <td><?= htmlspecialchars($t) ?></td>
-                </tr>
-            <?php endforeach; ?>
-        </table>
-    <?php endif; ?>
-
     <!-- SEZIONE STRIPE CHECKOUT -->
     <div class="stripe-section">
         <h2>💳 Pagamento con Stripe</h2>
         
         <?php if (!($stripeSecretKey && $stripePublishableKey)): ?>
-            <p style="color: orange;">Stripe non configurato. Controlla le variabili d'ambiente.</p>
+            <p style="color: red;">❌ Stripe non configurato correttamente. Controlla le variabili d'ambiente su Render.</p>
         <?php elseif (isset($stripeError)): ?>
-            <div style="color: red;">Errore Stripe: <?= htmlspecialchars($stripeError) ?></div>
+            <div style="color: red;">❌ Errore Stripe: <?= htmlspecialchars($stripeError) ?></div>
         <?php endif; ?>
 
         <?php if ($stripeSecretKey && $stripePublishableKey && $paymentIntent): ?>
@@ -129,29 +124,13 @@ if ($stripeSecretKey && $stripePublishableKey) {
             );
 
             if (error) {
-                // ✅ Gestione errori robusta
                 document.getElementById('payment-result').innerHTML = 
                     `<p style="color: red;">Errore: ${error.message}</p>`;
                 submitButton.disabled = false;
                 submitButton.textContent = 'Paga 19,99 €';
             } else if (paymentIntent) {
-                // ✅ Controllo esplicito dell'oggetto paymentIntent
-                switch (paymentIntent.status) {
-                    case 'succeeded':
-                        document.getElementById('payment-result').innerHTML = 
-                            `<p style="color: green;">Pagamento riuscito! ID: ${paymentIntent.id}</p>`;
-                        break;
-                    case 'processing':
-                        document.getElementById('payment-result').innerHTML = 
-                            `<p style="color: blue;">Pagamento in elaborazione...</p>`;
-                        break;
-                    default:
-                        document.getElementById('payment-result').innerHTML = 
-                            `<p style="color: orange;">Stato: ${paymentIntent.status}</p>`;
-                }
-            } else {
                 document.getElementById('payment-result').innerHTML = 
-                    `<p style="color: orange;">Risposta inattesa dal server.</p>`;
+                    `<p style="color: green;">Pagamento riuscito! ID: ${paymentIntent.id}</p>`;
             }
         });
     </script>
