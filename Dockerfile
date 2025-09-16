@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y \
     git \
     unzip \
     libcurl4-openssl-dev \
-    libonig-dev \  # AGGIUNGI QUESTA RIGA
+    libonig-dev \
     && docker-php-ext-install pdo pdo_pgsql curl mbstring \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
