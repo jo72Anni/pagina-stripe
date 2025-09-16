@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     git \
     unzip \
+    libcurl4-openssl-dev \  # AGGIUNGI QUESTA RIGA
     && docker-php-ext-install pdo pdo_pgsql curl mbstring \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
