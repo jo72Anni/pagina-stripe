@@ -2,10 +2,11 @@
 // Carica autoload di Composer
 require_once __DIR__ . '/vendor/autoload.php';
 
-// Configurazione Stripe
+// Configurazione Stripe - LEGGE DA VARIABILI RENDER
 $stripeSecretKey = getenv('STRIPE_SECRET_KEY');
 $stripePublishableKey = getenv('STRIPE_PUBLISHABLE_KEY');
 
+// Configura Stripe API key PRIMA di qualsiasi operazione
 if ($stripeSecretKey && $stripePublishableKey) {
     \Stripe\Stripe::setApiKey($stripeSecretKey);
 }
@@ -35,8 +36,8 @@ if ($stripeSecretKey && $stripePublishableKey) {
         $paymentIntent = \Stripe\PaymentIntent::create([
             'amount' => 1999, // 19.99 EUR
             'currency' => 'eur',
-            'automatic_payment_methods' => ['enabled' => true],
-            'metadata' => ['integration_check' => 'accept_a_payment']
+            'automatic_payment_methods' => ['enabled' => true]
+            // RIMOSSO: 'metadata' => ['integration_check' => 'accept_a_payment']
         ]);
     } catch (Exception $e) {
         $stripeError = $e->getMessage();
@@ -94,7 +95,7 @@ if ($stripeSecretKey && $stripePublishableKey) {
         <h2>💳 Pagamento con Stripe</h2>
         
         <?php if (!($stripeSecretKey && $stripePublishableKey)): ?>
-            <p style="color: orange;">Stripe non configurato. Imposta STRIPE_SECRET_KEY e STRIPE_PUBLISHABLE_KEY nel .env</p>
+            <p style="color: orange;">Stripe non configurato.</p>
         <?php elseif (isset($stripeError)): ?>
             <div style="color: red;">Errore Stripe: <?= htmlspecialchars($stripeError) ?></div>
         <?php endif; ?>
