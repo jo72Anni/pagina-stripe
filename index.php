@@ -2,23 +2,24 @@
 // Carica autoload di Composer
 require_once __DIR__ . '/vendor/autoload.php';
 
-// Configurazione Stripe - LEGGE DA VARIABILI RENDER
+// --- Lettura variabili d'ambiente ---
 $stripeSecretKey = getenv('STRIPE_SECRET_KEY');
 $stripePublishableKey = getenv('STRIPE_PUBLISHABLE_KEY');
 
-// ✅ DEBUG CRUCIALE - controlla se le variabili sono caricate
-error_log("Stripe Secret Key: " . ($stripeSecretKey ? 'PRESENTE' : 'ASSENTE'));
-error_log("Stripe Publishable Key: " . ($stripePublishableKey ? 'PRESENTE' : 'ASSENTE'));
-
-// ✅ FERMA TUTTO se manca la chiave segreta
-if (!$stripeSecretKey) {
-    die("ERRORE CRITICO: STRIPE_SECRET_KEY non configurata su Render. Controlla le Environment Variables.");
+if (!$stripeSecretKey || !$stripePublishableKey) {
+    error_log("❌ Stripe non configurato: Secret o Publishable Key mancanti.");
 }
 
-// ✅ Configura Stripe API key GLOBALMENTE (SOLO UNA VOLTA)
-\Stripe\Stripe::setApiKey($stripeSecretKey);
+// Debug log (solo su server, non in produzione!)
+error_log("Stripe Secret Key: " . ($stripeSecretKey ? 'Presente' : 'Assente'));
+error_log("Stripe Publishable Key: " . ($stripePublishableKey ? 'Presente' : 'Assente'));
 
-// Database
+// --- Configura Stripe ---
+if ($stripeSecretKey) {
+    \Stripe\Stripe::setApiKey($stripeSecretKey);
+}
+
+// --- Database ---
 $pdo = require __DIR__ . '/db.php';
 
 // Funzione per ottenere tutte le tabelle
@@ -34,28 +35,23 @@ function getAllTables(PDO $pdo) {
 
 $tables = getAllTables($pdo);
 
-// Creazione Payment Intent per Stripe
+// --- Creazione PaymentIntent (solo se Stripe configurato) ---
 $paymentIntent = null;
 $stripeError = null;
 
 if ($stripeSecretKey && $stripePublishableKey) {
     try {
-        // ✅ Versione CORRETTA - senza passare api_key nel secondo parametro
         $paymentIntent = \Stripe\PaymentIntent::create([
             'amount' => 1999,
             'currency' => 'eur',
             'automatic_payment_methods' => ['enabled' => true]
         ]);
-        
-        error_log("PaymentIntent creato con successo: " . $paymentIntent->id);
-        
-    } catch (Exception $e) {
+    } catch (\Stripe\Exception\ApiErrorException $e) {
         $stripeError = $e->getMessage();
-        error_log("Errore Stripe: " . $e->getMessage());
+        error_log("Errore Stripe: " . $stripeError);
     }
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -73,67 +69,79 @@ if ($stripeSecretKey && $stripePublishableKey) {
     </style>
 </head>
 <body>
-    <h1>Informazioni Sistema</h1>
-    <ul>
-        <li><strong>PHP Version:</strong> <?= phpversion() ?></li>
-        <li><strong>Stripe Configurato:</strong> <?= ($stripeSecretKey && $stripePublishableKey) ? 'Sì' : 'No' ?></li>
-        <li><strong>Database:</strong> <?= htmlspecialchars(getenv('DB_NAME')) ?></li>
-    </ul>
+<h1>Informazioni Sistema</h1>
+<ul>
+    <li><strong>PHP Version:</strong> <?= phpversion() ?></li>
+    <li><strong>Stripe Configurato:</strong> <?= ($stripeSecretKey && $stripePublishableKey) ? 'Sì' : 'No' ?></li>
+</ul>
 
-    <!-- SEZIONE STRIPE CHECKOUT -->
-    <div class="stripe-section">
-        <h2>💳 Pagamento con Stripe</h2>
-        
-        <?php if (!($stripeSecretKey && $stripePublishableKey)): ?>
-            <p style="color: red;">❌ Stripe non configurato correttamente. Controlla le variabili d'ambiente su Render.</p>
-        <?php elseif (isset($stripeError)): ?>
-            <div style="color: red;">❌ Errore Stripe: <?= htmlspecialchars($stripeError) ?></div>
-        <?php endif; ?>
+<h2>Database PostgreSQL</h2>
+<p>Connesso a: <?= htmlspecialchars(getenv('DB_NAME')) ?></p>
 
-        <?php if ($stripeSecretKey && $stripePublishableKey && $paymentIntent): ?>
-            <form id="payment-form">
-                <div id="card-element"></div>
-                <button id="submit-button">Paga 19,99 €</button>
-                <div id="payment-result"></div>
-            </form>
-        <?php endif; ?>
-    </div>
+<h2>Tabelle presenti</h2>
+<?php if (empty($tables)): ?>
+    <p>Nessuna tabella trovata.</p>
+<?php else: ?>
+    <table>
+        <tr><th>#</th><th>Nome Tabella</th></tr>
+        <?php foreach ($tables as $i => $t): ?>
+            <tr>
+                <td><?= $i+1 ?></td>
+                <td><?= htmlspecialchars($t) ?></td>
+            </tr>
+        <?php endforeach; ?>
+    </table>
+<?php endif; ?>
+
+<div class="stripe-section">
+    <h2>💳 Pagamento con Stripe</h2>
+
+    <?php if (!($stripeSecretKey && $stripePublishableKey)): ?>
+        <p style="color: orange;">Stripe non configurato.</p>
+    <?php elseif ($stripeError): ?>
+        <div style="color: red;">Errore Stripe: <?= htmlspecialchars($stripeError) ?></div>
+    <?php endif; ?>
 
     <?php if ($stripeSecretKey && $stripePublishableKey && $paymentIntent): ?>
-    <script>
-        const stripe = Stripe('<?= $stripePublishableKey ?>');
-        const elements = stripe.elements();
-        const cardElement = elements.create('card');
-        cardElement.mount('#card-element');
-
-        const form = document.getElementById('payment-form');
-        form.addEventListener('submit', async (event) => {
-            event.preventDefault();
-            
-            const submitButton = document.getElementById('submit-button');
-            submitButton.disabled = true;
-            submitButton.textContent = 'Processing...';
-
-            const { error, paymentIntent } = await stripe.confirmCardPayment(
-                '<?= $paymentIntent->client_secret ?>',
-                {
-                    payment_method: {
-                        card: cardElement,
-                    }
-                }
-            );
-
-            if (error) {
-                document.getElementById('payment-result').innerHTML = 
-                    `<p style="color: red;">Errore: ${error.message}</p>`;
-                submitButton.disabled = false;
-                submitButton.textContent = 'Paga 19,99 €';
-            } else if (paymentIntent) {
-                document.getElementById('payment-result').innerHTML = 
-                    `<p style="color: green;">Pagamento riuscito! ID: ${paymentIntent.id}</p>`;
-            }
-        });
-    </script>
+        <form id="payment-form">
+            <div id="card-element"></div>
+            <button id="submit-button">Paga 19,99 €</button>
+            <div id="payment-result"></div>
+        </form>
     <?php endif; ?>
+</div>
+
+<?php if ($stripeSecretKey && $stripePublishableKey && $paymentIntent): ?>
+<script>
+const stripe = Stripe('<?= $stripePublishableKey ?>');
+const elements = stripe.elements();
+const cardElement = elements.create('card');
+cardElement.mount('#card-element');
+
+const form = document.getElementById('payment-form');
+form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    
+    const submitButton = document.getElementById('submit-button');
+    submitButton.disabled = true;
+    submitButton.textContent = 'Processing...';
+
+    const { error, paymentIntent } = await stripe.confirmCardPayment(
+        '<?= $paymentIntent->client_secret ?>',
+        { payment_method: { card: cardElement } }
+    );
+
+    if (error) {
+        document.getElementById('payment-result').innerHTML = 
+            `<p style="color: red;">Errore: ${error.message}</p>`;
+        submitButton.disabled = false;
+        submitButton.textContent = 'Paga 19,99 €';
+    } else if (paymentIntent.status === 'succeeded') {
+        document.getElementById('payment-result').innerHTML = 
+            `<p style="color: green;">Pagamento riuscito! ID: ${paymentIntent.id}</p>`;
+    }
+});
+</script>
+<?php endif; ?>
 </body>
 </html>
