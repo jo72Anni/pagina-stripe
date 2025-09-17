@@ -13,6 +13,8 @@ $stripePublicKey = getenv('STRIPE_PUBLIC_KEY');
 
 // Inizializza Stripe solo se le keys sono presenti
 if ($stripeSecretKey) {
+    // ✅ Versione API STABILE e COLLAUDATA
+    \Stripe\Stripe::setApiVersion('2025-07-15');
     \Stripe\Stripe::setApiKey($stripeSecretKey);
 }
 
@@ -94,7 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_checkout']) &&
                 <li><strong>Server Software:</strong> <?= $_SERVER['SERVER_SOFTWARE'] ?? 'N/A' ?></li>
                 <li><strong>Environment:</strong> <?= getenv('APP_ENV') ?: 'production' ?></li>
                 <li><strong>Stripe Keys:</strong> <?= $stripePublicKey ? '✅ Configured' : '❌ Missing' ?></li>
-                <li><strong>Stripe API Version:</strong> Automatica (libreria)</li>
+                <li><strong>Stripe API Version:</strong> 2025-07-15 (stabile)</li>
             </ul>
         </div>
 
