@@ -1,34 +1,41 @@
-# Usa immagine base PHP con Apache
-FROM php:8.2.12-apache
+FROM php:8.2-apache
 
-# Installa dipendenze di sistema (solo ciò che serve)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq-dev \
+# Installa dipendenze di sistema + git + zip
+RUN apt-get update && apt-get install -y \
+    libzip-dev \
     libcurl4-openssl-dev \
     libonig-dev \
+    libpq-dev \
     git \
     unzip \
- && docker-php-ext-install pdo pdo_pgsql curl mbstring \
- && apt-get purge -y --auto-remove git unzip \
- && rm -rf /var/lib/apt/lists/*
+    zip \
+    && docker-php-ext-install zip pdo pdo_pgsql mbstring curl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Installa Composer (versione stabile, non latest)
-COPY --from=composer:2.7 /usr/bin/composer /usr/bin/composer
+# Configura Apache (fix per ServerName e abilita rewrite)
+RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf \
+    && a2enmod rewrite
 
-# Abilita mod_rewrite
-RUN a2enmod rewrite
+# Installa Composer
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-# Directory di lavoro
-WORKDIR /var/www/html/
+WORKDIR /var/www/html
 
-# Copia solo i file di composer per caching
-COPY composer.json composer.lock* ./
+# Copia composer files
+COPY composer.json composer.lock ./
 
-# Installa le dipendenze (Stripe + dotenv)
-RUN composer install --no-dev --no-scripts --prefer-dist --no-interaction --optimize-autoloader
+# Installa dipendenze (NON come root per evitare warning)
+RUN adduser --disabled-password --gecos '' composer-user \
+    && chown -R composer-user:composer-user /var/www/html \
+    && su composer-user -c "composer install --no-dev --no-scripts --prefer-dist --no-interaction --optimize-autoloader"
 
-# Copia tutto il resto del progetto (con permessi corretti)
-COPY --chown=www-data:www-data . /var/www/html/
+# Copia il resto dell'app
+COPY . .
 
-# Espone la porta 80
+# Imposta permessi
+RUN chown -R www-data:www-data /var/www/html \
+    && chmod -R 755 /var/www/html/storage
+
 EXPOSE 80
+CMD ["apache2-foreground"]
