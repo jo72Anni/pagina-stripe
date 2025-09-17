@@ -33,9 +33,8 @@ RUN adduser --disabled-password --gecos '' composer-user \
 # Copia il resto dell'app
 COPY . .
 
-# Imposta permessi
-RUN chown -R www-data:www-data /var/www/html \
-    && chmod -R 755 /var/www/html/storage
+# Imposta permessi (SOLO sulla cartella principale)
+RUN chown -R www-data:www-data /var/www/html
 
 EXPOSE 80
 CMD ["apache2-foreground"]
