@@ -25,15 +25,13 @@ WORKDIR /var/www/html
 # Copia composer files
 COPY composer.json composer.lock ./
 
-# Installa dipendenze (NON come root per evitare warning)
-RUN adduser --disabled-password --gecos '' composer-user \
-    && chown -R composer-user:composer-user /var/www/html \
-    && su composer-user -c "composer install --no-dev --no-scripts --prefer-dist --no-interaction --optimize-autoloader"
+# Installa dipendenze (COME ROOT - necessario per v7.128.0)
+RUN composer install --no-dev --no-scripts --prefer-dist --no-interaction --optimize-autoloader
 
 # Copia il resto dell'app
 COPY . .
 
-# Imposta permessi (SOLO sulla cartella principale)
+# Imposta permessi
 RUN chown -R www-data:www-data /var/www/html
 
 EXPOSE 80
