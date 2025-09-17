@@ -1,0 +1,18 @@
+# Escludi Git
+.git
+.gitignore
+
+# Escludi dipendenze
+vendor
+node_modules
+
+# Escludi file di ambiente locali
+.env
+*.log
+
+# Escludi cartelle di editor
+.vscode
+.idea
+
+# Escludi test (se li hai)
+tests

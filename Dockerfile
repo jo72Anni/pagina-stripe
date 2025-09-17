@@ -1,35 +1,34 @@
 # Usa immagine base PHP con Apache
-FROM php:8.2-apache
+FROM php:8.2.12-apache
 
-# Installa le dipendenze di sistema (PER STRIPE + POSTGRES)
-RUN apt-get update && apt-get install -y \
+# Installa dipendenze di sistema (solo ciò che serve)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
-    git \
-    unzip \
     libcurl4-openssl-dev \
     libonig-dev \
-    && docker-php-ext-install pdo pdo_pgsql curl mbstring \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    git \
+    unzip \
+ && docker-php-ext-install pdo pdo_pgsql curl mbstring \
+ && apt-get purge -y --auto-remove git unzip \
+ && rm -rf /var/lib/apt/lists/*
 
-# Installa Composer
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+# Installa Composer (versione stabile, non latest)
+COPY --from=composer:2.7 /usr/bin/composer /usr/bin/composer
 
 # Abilita mod_rewrite
 RUN a2enmod rewrite
 
-# Copia PRIMA solo i file di Composer (per caching)
-COPY composer.json composer.lock* /var/www/html/
-
-# Installa le dipendenze Composer (Stripe + dotenv)
+# Directory di lavoro
 WORKDIR /var/www/html/
-RUN composer install --no-dev --no-interaction --optimize-autoloader
 
-# Copia tutto il resto del progetto
-COPY . /var/www/html/
+# Copia solo i file di composer per caching
+COPY composer.json composer.lock* ./
 
-# Imposta i permessi generali
-RUN chown -R www-data:www-data /var/www/html
+# Installa le dipendenze (Stripe + dotenv)
+RUN composer install --no-dev --no-scripts --prefer-dist --no-interaction --optimize-autoloader
+
+# Copia tutto il resto del progetto (con permessi corretti)
+COPY --chown=www-data:www-data . /var/www/html/
 
 # Espone la porta 80
 EXPOSE 80
