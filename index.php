@@ -13,8 +13,8 @@ $stripePublicKey = getenv('STRIPE_PUBLIC_KEY');
 
 // Inizializza Stripe solo se le keys sono presenti
 if ($stripeSecretKey) {
-    // ✅ Versione API STABILE e COLLAUDATA
-    \Stripe\Stripe::setApiVersion('2025-07-15');
+    // ✅ SOLO API KEY - NESSUNA versione forzata
+    // La libreria gestisce automaticamente gli headers
     \Stripe\Stripe::setApiKey($stripeSecretKey);
 }
 
@@ -39,8 +39,9 @@ $error = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_checkout']) && $stripeSecretKey) {
     try {
+        // ✅ CORRETTO: solo parametri essenziali
+        // NESSUNA versione API nei parametri
         $checkoutSession = \Stripe\Checkout\Session::create([
-            'payment_method_types' => ['card'],
             'line_items' => [[
                 'price_data' => [
                     'currency' => 'eur',
@@ -55,6 +56,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_checkout']) &&
             'mode' => 'payment',
             'success_url' => 'https://' . $_SERVER['HTTP_HOST'] . '/?success=true',
             'cancel_url' => 'https://' . $_SERVER['HTTP_HOST'] . '/?canceled=true',
+            
+            // ✅ Payment method types è IMPLICITO
+            // La libreria usa 'card' automaticamente per mode: 'payment'
         ]);
     } catch (Exception $e) {
         $error = $e->getMessage();
@@ -96,7 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_checkout']) &&
                 <li><strong>Server Software:</strong> <?= $_SERVER['SERVER_SOFTWARE'] ?? 'N/A' ?></li>
                 <li><strong>Environment:</strong> <?= getenv('APP_ENV') ?: 'production' ?></li>
                 <li><strong>Stripe Keys:</strong> <?= $stripePublicKey ? '✅ Configured' : '❌ Missing' ?></li>
-                <li><strong>Stripe API Version:</strong> 2025-07-15 (stabile)</li>
+                <li><strong>Stripe API Version:</strong> Automatica (libreria)</li>
             </ul>
         </div>
 
