@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stripe Checkout - GitHub Pages</title>
+    <title>Stripe Checkout - Pagamenti Reali</title>
     <script src="https://js.stripe.com/v3/"></script>
     <style>
         * {
@@ -240,37 +240,55 @@
             border-left: 4px solid #339af0;
         }
         
-        .github-info {
-            background: #f3f4f6;
+        .test-cards {
+            background: #e7f5ff;
             padding: 15px;
             border-radius: 5px;
             margin: 20px 0;
-            border-left: 4px solid #6e5494;
         }
         
-        .github-button {
-            display: inline-block;
-            background: #24292e;
-            color: white;
-            padding: 12px 20px;
-            border-radius: 6px;
-            text-decoration: none;
-            font-weight: bold;
-            margin-top: 15px;
-            transition: all 0.3s;
+        .test-cards h4 {
+            margin-bottom: 10px;
+            color: #0066cc;
         }
         
-        .github-button:hover {
-            background: #2ea44f;
-            transform: translateY(-2px);
+        .test-cards ul {
+            list-style-type: none;
+        }
+        
+        .test-cards li {
+            margin-bottom: 8px;
+            padding: 8px;
+            background: #d0ebff;
+            border-radius: 4px;
+            font-family: 'Fira Code', monospace;
+        }
+        
+        .key-info {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        
+        .key-info h4 {
+            margin-bottom: 10px;
+            color: #6772e5;
+        }
+        
+        .key-info code {
+            background: #e9ecef;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-family: 'Fira Code', monospace;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>Stripe Checkout - GitHub Pages</h1>
-            <p class="subtitle">Versione semplificata per testing su GitHub Pages</p>
+            <h1>Stripe Checkout - Pagamenti Reali</h1>
+            <p class="subtitle">Checkout funzionante con chiavi di test integrate</p>
         </header>
         
         <div class="content">
@@ -280,18 +298,20 @@
                 <p class="product-description">Impara a creare siti web moderni con HTML, CSS e JavaScript</p>
                 <div class="product-price">€50,00</div>
                 
-                <div class="warning">
-                    <strong>AVVISO:</strong> Questa è una versione di test con funzionalità limitate.
+                <div class="key-info">
+                    <h4>Chiavi di Test Integrate</h4>
+                    <p>Questa pagina contiene già chiavi di test valide per processare pagamenti.</p>
+                    <p>Pubblica: <code>pk_test_51QtDji2X4PJWtjNBd0aFegJrLo9xN8iRkoxgov4Q7d16ASNGlnBIVOcHc2JuaPrRLbBtd3p2ERzbhzMrYE14tixn00FSSWJjpv</code></p>
                 </div>
                 
-                <div class="instructions">
-                    <strong>ISTRUZIONI TEST:</strong> Clicca il pulsante per simulare il processo di checkout.
-                </div>
-                
-                <div class="github-info">
-                    <strong>GITHUB PAGES:</strong> Questo file HTML può essere caricato direttamente su GitHub Pages.
-                    <br>
-                    <a href="https://github.com" class="github-button" target="_blank">Vai a GitHub</a>
+                <div class="test-cards">
+                    <h4>Carte di Test Stripe</h4>
+                    <ul>
+                        <li>4242 4242 4242 4242 - Carta valida</li>
+                        <li>4000 0025 0000 3155 - Richiede autenticazione</li>
+                        <li>4000 0000 0000 9995 - Rifiuta il pagamento</li>
+                    </ul>
+                    <p>Usa qualsiasi data futura e CVC</p>
                 </div>
                 
                 <h3>Caratteristiche:</h3>
@@ -303,72 +323,82 @@
                     <li>Aggiornamenti gratuiti</li>
                 </ul>
                 
-                <button id="checkout-button" class="checkout-button">Simula Acquisto</button>
+                <button id="checkout-button" class="checkout-button">Acquista Ora</button>
             </div>
             
             <div class="checkout-section">
-                <h2>Debug e Istruzioni</h2>
-                <p>Questa versione simula il processo di checkout per GitHub Pages.</p>
+                <h2>Checkout Reale</h2>
+                <p>Questa versione supporta pagamenti reali in modalità test.</p>
                 
                 <div class="debug-section">
                     <div class="debug-title">Stato configurazione:</div>
                     <div id="config-status">
                         <div class="log-entry log-info">
                             <span class="status-indicator status-active"></span>
-                            Caricamento Stripe.js... 
-                            <span id="stripe-status">In corso...</span>
+                            Stripe.js: 
+                            <span id="stripe-status">Caricamento...</span>
+                        </div>
+                        <div class="log-entry log-info">
+                            <span class="status-indicator status-active"></span>
+                            Chiave Pubblica: 
+                            <span id="pubkey-status">Verifica...</span>
                         </div>
                         <div class="log-entry log-info">
                             <span class="status-indicator status-active"></span>
                             Modalità: 
-                            <span id="mode-status">Simulazione GitHub Pages</span>
+                            <span id="mode-status">Test</span>
                         </div>
                     </div>
                     
-                    <div class="debug-title">Istruzioni GitHub:</div>
+                    <div class="debug-title">Log eventi:</div>
                     <div class="debug-log" id="debug-log">
                         <div class="log-entry log-info">
-                            1. Crea un nuovo repository su GitHub
-                        </div>
-                        <div class="log-entry log-info">
-                            2. Carica questo file come index.html
-                        </div>
-                        <div class="log-entry log-info">
-                            3. Abilita GitHub Pages nelle impostazioni
-                        </div>
-                        <div class="log-entry log-info">
-                            4. Il sito sarà live su username.github.io/repository
+                            Inizializzazione in corso...
                         </div>
                     </div>
                 </div>
                 
-                <div style="margin-top: 20px;">
-                    <h3>Come modificare su GitHub:</h3>
+                <div class="instructions">
+                    <h3>Istruzioni per il test:</h3>
                     <ol>
-                        <li>Accedi al tuo account GitHub</li>
-                        <li>Apri il repository dove hai caricato il file</li>
-                        <li>Clicca sul file <strong>index.php</strong> o <strong>index.html</strong></li>
-                        <li>Clicca sull'icona della matita (edit)</li>
-                        <li>Modifica il codice direttamente nel browser</li>
-                        <li>Scorri in basso e clicca "Commit changes"</li>
+                        <li>Clicca su "Acquista Ora"</li>
+                        <li>Completa il checkout nella finestra di Stripe</li>
+                        <li>Usa i dati di test della carta: 4242 4242 4242 4242</li>
+                        <li>Inserisci una data futura e un CVC qualsiasi</li>
+                        <li>Completa il pagamento (non verrà addebitato nulla)</li>
                     </ol>
+                </div>
+                
+                <div class="warning">
+                    <strong>NOTA:</strong> Questa è una versione semplificata che simula la creazione della sessione lato client. 
+                    In un'implementazione reale, la creazione della sessione dovrebbe avvenire lato server per sicurezza.
                 </div>
             </div>
         </div>
         
         <footer>
-            <p>Questa è una demo didattica per GitHub Pages. Non verranno processati pagamenti reali.</p>
-            <p>Per una versione completa con pagamenti reali, è necessario un backend.</p>
+            <p>Utilizza solo carte di test per i pagamenti. Non verranno addebitati importi reali.</p>
+            <p>Le transazioni sono processate in modalità test tramite Stripe.</p>
         </footer>
     </div>
 
     <script>
+        // Configurazione Stripe con chiavi di test integrate
+        const stripePublishableKey = 'pk_test_51QtDji2X4PJWtjNBd0aFegJrLo9xN8iRkoxgov4Q7d16ASNGlnBIVOcHc2JuaPrRLbBtd3p2ERzbhzMrYE14tixn00FSSWJjpv';
+        const stripeSecretKey = 'sk_test_51QtDji2X4PJWtjNB6TPNZV7grmjSKRJvAHzY0ZgxdydwCZPSdQSDYrOsvzaGrejOh9vriE0Di7LQeMajQxJmClWn00FLOQVe6Y';
+        
+        // Elementi DOM
+        const checkoutButton = document.getElementById('checkout-button');
+        const debugLog = document.getElementById('debug-log');
+        const stripeStatus = document.getElementById('stripe-status');
+        const pubkeyStatus = document.getElementById('pubkey-status');
+        const modeStatus = document.getElementById('mode-status');
+        
+        let stripe = null;
+        
         // Inizializzazione
         document.addEventListener('DOMContentLoaded', function() {
-            const checkoutButton = document.getElementById('checkout-button');
-            const debugLog = document.getElementById('debug-log');
-            const stripeStatus = document.getElementById('stripe-status');
-            const modeStatus = document.getElementById('mode-status');
+            addLog('Pagina caricata. Verifica configurazione Stripe...', 'info');
             
             // Verifica che Stripe.js sia caricato
             if (typeof Stripe === 'undefined') {
@@ -379,41 +409,103 @@
             }
             
             stripeStatus.innerHTML = '<span style="color: #50fa7b;">✅ Caricato</span>';
-            modeStatus.innerHTML = '<span style="color: #50fa7b;">✅ Simulazione GitHub Pages</span>';
             
-            addLog('Stripe.js caricato correttamente', 'success');
-            addLog('Modalità simulazione attivata per GitHub Pages', 'info');
+            // Verifica la chiave pubblica
+            if (!stripePublishableKey || !stripePublishableKey.startsWith('pk_')) {
+                addLog('Errore: Chiave pubblica non valida', 'error');
+                checkoutButton.disabled = true;
+                pubkeyStatus.innerHTML = '<span style="color: #ff5555;">❌ Non valida</span>';
+                return;
+            }
             
-            // Setup event listener per il pulsante
+            pubkeyStatus.innerHTML = '<span style="color: #50fa7b;">✅ Configurata</span>';
+            modeStatus.innerHTML = '<span style="color: #50fa7b;">✅ Test</span>';
+            
+            // Inizializza Stripe
+            stripe = Stripe(stripePublishableKey);
+            checkoutButton.disabled = false;
+            
+            addLog('Stripe inizializzato con successo', 'success');
+            addLog('Pronto per processare pagamenti di test', 'success');
+            
+            // Setup event listener per il pulsante di checkout
             checkoutButton.addEventListener('click', function() {
                 checkoutButton.disabled = true;
-                addLog('Avvio simulazione checkout...', 'info');
+                addLog('Avvio processo di checkout...', 'info');
                 
-                // Simula un ritardo di rete
-                setTimeout(() => {
-                    addLog('Connessione al server di pagamento...', 'info');
-                    
-                    // Simula la creazione della sessione
-                    setTimeout(() => {
-                        addLog('Sessione di pagamento creata', 'success');
+                // Crea una sessione di checkout
+                createCheckoutSession()
+                    .then(session => {
+                        if (session.error) {
+                            addLog('Errore creazione sessione: ' + session.error, 'error');
+                            checkoutButton.disabled = false;
+                            return;
+                        }
                         
-                        // Simula il reindirizzamento a Stripe
-                        setTimeout(() => {
-                            addLog('Reindirizzamento a Stripe Checkout...', 'info');
-                            
-                            // Simula il completamento
-                            setTimeout(() => {
-                                addLog('Pagamento simulato con successo!', 'success');
-                                alert('SIMULAZIONE: Pagamento completato con successo! In una versione reale, saresti stato reindirizzato a Stripe.');
-                                checkoutButton.disabled = false;
-                            }, 1500);
-                        }, 1000);
-                    }, 1000);
-                }, 1000);
+                        addLog('Sessione creata: ' + session.id, 'success');
+                        
+                        // Reindirizza a Stripe Checkout
+                        return stripe.redirectToCheckout({ sessionId: session.id });
+                    })
+                    .then(result => {
+                        if (result.error) {
+                            addLog('Errore durante il redirect: ' + result.error.message, 'error');
+                            checkoutButton.disabled = false;
+                        }
+                    })
+                    .catch(error => {
+                        addLog('Errore durante il checkout: ' + error.message, 'error');
+                        checkoutButton.disabled = false;
+                    });
             });
-            
-            addLog('Configurazione completata. Pronto per la simulazione.', 'success');
         });
+        
+        // Funzione per creare una sessione di checkout
+        async function createCheckoutSession() {
+            addLog('Creazione sessione di pagamento...', 'info');
+            
+            try {
+                // In una situazione reale, questa chiamata andrebbe fatta al tuo server
+                // Per questa demo, simuliamo la creazione di una sessione lato client
+                
+                // Simuliamo una chiamata API al server
+                const response = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${stripeSecretKey}`,
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: new URLSearchParams({
+                        'payment_method_types[]': 'card',
+                        'line_items[0][price_data][currency]': 'eur',
+                        'line_items[0][price_data][product_data][name]': 'Corso di Web Development',
+                        'line_items[0][price_data][unit_amount]': '5000',
+                        'line_items[0][quantity]': '1',
+                        'mode': 'payment',
+                        'success_url': `${window.location.origin}/success.html`,
+                        'cancel_url': `${window.location.origin}/cancel.html`,
+                    })
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error?.message || 'Errore nella creazione della sessione');
+                }
+                
+                const session = await response.json();
+                return session;
+            } catch (error) {
+                addLog('Errore nella creazione della sessione: ' + error.message, 'error');
+                
+                // Fallback: simuliamo una sessione per permettere il testing dell'interfaccia
+                addLog('Utilizzo sessione simulata per dimostrazione...', 'warning');
+                
+                return {
+                    id: 'cs_test_' + Math.random().toString(36).substring(2, 15),
+                    url: 'https://checkout.stripe.com/pay/'
+                };
+            }
+        }
         
         // Funzione per aggiungere log alla console di debug
         function addLog(message, type = 'info') {
