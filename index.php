@@ -1,172 +1,9 @@
-<?php
-// Configurazione Stripe (TUTTO INLINE - SOLO PER TESTING)
-$stripe_publishable_key = 'pk_test_51QtDji2X4PJWtjNBd0aFegJrLo9xN8iRkoxgov4Q7d16ASNGlnBIVOcHc2JuaPrRLbBtd3p2ERzbhzMrYE14tixn00FSSWJjpv';
-$stripe_secret_key = 'sk_test_51QtDji2X4PJWtjNB6TPNZV7grmjSKRJvAHzY0ZgxdydwCZPSdQSDYrOsvzaGrejOh9vriE0Di7LQeMajQxJmClWn00FLOQVe6Y';
-
-// Gestione della creazione della sessione di checkout
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_checkout_session'])) {
-    // Configura Stripe
-    require_once 'vendor/autoload.php';
-    \Stripe\Stripe::setApiKey($stripe_secret_key);
-    
-    header('Content-Type: application/json');
-    
-    try {
-        $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http";
-        $host = $_SERVER['HTTP_HOST'];
-        $base_url = $protocol . "://" . $host;
-        
-        $session = \Stripe\Checkout\Session::create([
-            'payment_method_types' => ['card'],
-            'line_items' => [[
-                'price_data' => [
-                    'currency' => 'eur',
-                    'product_data' => ['name' => 'Corso di Web Development'],
-                    'unit_amount' => 5000, // 50,00 €
-                ],
-                'quantity' => 1,
-            ]],
-            'mode' => 'payment',
-            'success_url' => $base_url . $_SERVER['PHP_SELF'] . '?success=true',
-            'cancel_url' => $base_url . $_SERVER['PHP_SELF'] . '?cancel=true',
-        ]);
-        
-        echo json_encode(['id' => $session->id]);
-        exit;
-        
-    } catch (Exception $e) {
-        http_response_code(500);
-        echo json_encode(['error' => $e->getMessage()]);
-        exit;
-    }
-}
-
-// Pagina di successo
-if (isset($_GET['success'])) {
-    echo '<!DOCTYPE html>
-    <html lang="it">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Pagamento Riuscito</title>
-        <style>
-            body { 
-                font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; 
-                background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                height: 100vh;
-                margin: 0;
-            }
-            .success-container {
-                text-align: center;
-                background: white;
-                padding: 40px;
-                border-radius: 15px;
-                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-                max-width: 500px;
-            }
-            .success-icon {
-                font-size: 4rem;
-                color: #4caf50;
-                margin-bottom: 20px;
-            }
-            h1 {
-                color: #333;
-                margin-bottom: 20px;
-            }
-            .btn {
-                display: inline-block;
-                background: linear-gradient(135deg, #6772e5 0%, #5469d4 100%);
-                color: white;
-                padding: 12px 24px;
-                border-radius: 4px;
-                text-decoration: none;
-                font-weight: bold;
-                margin-top: 20px;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="success-container">
-            <div class="success-icon">✅</div>
-            <h1>Pagamento completato con successo!</h1>
-            <p>Grazie per il tuo acquisto. Il corso è ora disponibile nel tuo account.</p>
-            <a href="' . $_SERVER['PHP_SELF'] . '" class="btn">Torna alla Home</a>
-        </div>
-    </body>
-    </html>';
-    exit;
-}
-
-// Pagina di cancellazione
-if (isset($_GET['cancel'])) {
-    echo '<!DOCTYPE html>
-    <html lang="it">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Pagamento Annullato</title>
-        <style>
-            body { 
-                font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; 
-                background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                height: 100vh;
-                margin: 0;
-            }
-            .cancel-container {
-                text-align: center;
-                background: white;
-                padding: 40px;
-                border-radius: 15px;
-                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-                max-width: 500px;
-            }
-            .cancel-icon {
-                font-size: 4rem;
-                color: #f44336;
-                margin-bottom: 20px;
-            }
-            h1 {
-                color: #333;
-                margin-bottom: 20px;
-            }
-            .btn {
-                display: inline-block;
-                background: linear-gradient(135deg, #6772e5 0%, #5469d4 100%);
-                color: white;
-                padding: 12px 24px;
-                border-radius: 4px;
-                text-decoration: none;
-                font-weight: bold;
-                margin-top: 20px;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="cancel-container">
-            <div class="cancel-icon">❌</div>
-            <h1>Pagamento annullato</h1>
-            <p>Hai annullato il processo di pagamento. Nessun addebito è stato effettuato.</p>
-            <a href="' . $_SERVER['PHP_SELF'] . '" class="btn">Torna alla Home</a>
-        </div>
-    </body>
-    </html>';
-    exit;
-}
-
-// Pagina principale
-?>
 <!DOCTYPE html>
 <html lang="it">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stripe Checkout - Tutto in un file</title>
+    <title>Stripe Checkout - GitHub Pages</title>
     <script src="https://js.stripe.com/v3/"></script>
     <style>
         * {
@@ -402,13 +239,38 @@ if (isset($_GET['cancel'])) {
             margin: 20px 0;
             border-left: 4px solid #339af0;
         }
+        
+        .github-info {
+            background: #f3f4f6;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            border-left: 4px solid #6e5494;
+        }
+        
+        .github-button {
+            display: inline-block;
+            background: #24292e;
+            color: white;
+            padding: 12px 20px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: bold;
+            margin-top: 15px;
+            transition: all 0.3s;
+        }
+        
+        .github-button:hover {
+            background: #2ea44f;
+            transform: translateY(-2px);
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>Stripe Checkout Integrato</h1>
-            <p class="subtitle">Tutto in un unico file PHP - Per testing</p>
+            <h1>Stripe Checkout - GitHub Pages</h1>
+            <p class="subtitle">Versione semplificata per testing su GitHub Pages</p>
         </header>
         
         <div class="content">
@@ -419,11 +281,17 @@ if (isset($_GET['cancel'])) {
                 <div class="product-price">€50,00</div>
                 
                 <div class="warning">
-                    <strong>AVVISO:</strong> Questa è una versione di test con chiavi integrate nel codice. Non usare in produzione!
+                    <strong>AVVISO:</strong> Questa è una versione di test con funzionalità limitate.
                 </div>
                 
                 <div class="instructions">
-                    <strong>ISTRUZIONI TEST:</strong> Usa la carta di test 4242 4242 4242 4242, data futura e CVC qualsiasi.
+                    <strong>ISTRUZIONI TEST:</strong> Clicca il pulsante per simulare il processo di checkout.
+                </div>
+                
+                <div class="github-info">
+                    <strong>GITHUB PAGES:</strong> Questo file HTML può essere caricato direttamente su GitHub Pages.
+                    <br>
+                    <a href="https://github.com" class="github-button" target="_blank">Vai a GitHub</a>
                 </div>
                 
                 <h3>Caratteristiche:</h3>
@@ -435,12 +303,12 @@ if (isset($_GET['cancel'])) {
                     <li>Aggiornamenti gratuiti</li>
                 </ul>
                 
-                <button id="checkout-button" class="checkout-button">Acquista Ora</button>
+                <button id="checkout-button" class="checkout-button">Simula Acquisto</button>
             </div>
             
             <div class="checkout-section">
-                <h2>Debug e Log</h2>
-                <p>Qui puoi vedere in tempo reale lo stato del pagamento e gli eventuali errori.</p>
+                <h2>Debug e Istruzioni</h2>
+                <p>Questa versione simula il processo di checkout per GitHub Pages.</p>
                 
                 <div class="debug-section">
                     <div class="debug-title">Stato configurazione:</div>
@@ -452,48 +320,55 @@ if (isset($_GET['cancel'])) {
                         </div>
                         <div class="log-entry log-info">
                             <span class="status-indicator status-active"></span>
-                            Chiave pubblica: 
-                            <span id="pubkey-status">In verifica...</span>
+                            Modalità: 
+                            <span id="mode-status">Simulazione GitHub Pages</span>
                         </div>
                     </div>
                     
-                    <div class="debug-title">Log eventi:</div>
+                    <div class="debug-title">Istruzioni GitHub:</div>
                     <div class="debug-log" id="debug-log">
                         <div class="log-entry log-info">
-                            Inizializzazione in corso...
+                            1. Crea un nuovo repository su GitHub
+                        </div>
+                        <div class="log-entry log-info">
+                            2. Carica questo file come index.html
+                        </div>
+                        <div class="log-entry log-info">
+                            3. Abilita GitHub Pages nelle impostazioni
+                        </div>
+                        <div class="log-entry log-info">
+                            4. Il sito sarà live su username.github.io/repository
                         </div>
                     </div>
                 </div>
                 
                 <div style="margin-top: 20px;">
-                    <h3>File Info:</h3>
-                    <p>Questo è un unico file PHP che contiene:</p>
-                    <ul>
-                        <li>Frontend HTML/CSS/JS</li>
-                        <li>Backend PHP per Stripe</li>
-                        <li>Pagine di successo/errore</li>
-                        <li>Configurazione completa</li>
-                    </ul>
+                    <h3>Come modificare su GitHub:</h3>
+                    <ol>
+                        <li>Accedi al tuo account GitHub</li>
+                        <li>Apri il repository dove hai caricato il file</li>
+                        <li>Clicca sul file <strong>index.php</strong> o <strong>index.html</strong></li>
+                        <li>Clicca sull'icona della matita (edit)</li>
+                        <li>Modifica il codice direttamente nel browser</li>
+                        <li>Scorri in basso e clicca "Commit changes"</li>
+                    </ol>
                 </div>
             </div>
         </div>
         
         <footer>
-            <p>Questa è una demo didattica. Non verrà addebitato alcun importo reale.</p>
-            <p>Utilizza solo carte di test per i pagamenti.</p>
+            <p>Questa è una demo didattica per GitHub Pages. Non verranno processati pagamenti reali.</p>
+            <p>Per una versione completa con pagamenti reali, è necessario un backend.</p>
         </footer>
     </div>
 
     <script>
-        // Configurazione Stripe (TUTTO INLINE - SOLO PER TESTING)
-        const stripePublishableKey = '<?php echo $stripe_publishable_key; ?>';
-        
         // Inizializzazione
         document.addEventListener('DOMContentLoaded', function() {
             const checkoutButton = document.getElementById('checkout-button');
             const debugLog = document.getElementById('debug-log');
             const stripeStatus = document.getElementById('stripe-status');
-            const pubkeyStatus = document.getElementById('pubkey-status');
+            const modeStatus = document.getElementById('mode-status');
             
             // Verifica che Stripe.js sia caricato
             if (typeof Stripe === 'undefined') {
@@ -504,61 +379,40 @@ if (isset($_GET['cancel'])) {
             }
             
             stripeStatus.innerHTML = '<span style="color: #50fa7b;">✅ Caricato</span>';
+            modeStatus.innerHTML = '<span style="color: #50fa7b;">✅ Simulazione GitHub Pages</span>';
             
-            // Verifica la chiave pubblica
-            if (!stripePublishableKey || stripePublishableKey.length < 10) {
-                addLog('Errore: Chiave pubblica non valida', 'error');
-                checkoutButton.disabled = true;
-                pubkeyStatus.innerHTML = '<span style="color: #ff5555;">❌ Non valida</span>';
-                return;
-            }
-            
-            pubkeyStatus.innerHTML = '<span style="color: #50fa7b;">✅ Configurata</span>';
-            addLog('Chiave pubblica verificata con successo', 'success');
-            
-            // Inizializza Stripe
-            const stripe = Stripe(stripePublishableKey);
+            addLog('Stripe.js caricato correttamente', 'success');
+            addLog('Modalità simulazione attivata per GitHub Pages', 'info');
             
             // Setup event listener per il pulsante
             checkoutButton.addEventListener('click', function() {
                 checkoutButton.disabled = true;
-                addLog('Avvio processo di checkout...', 'info');
+                addLog('Avvio simulazione checkout...', 'info');
                 
-                // Crea una richiesta al backend (che è nello stesso file PHP)
-                const formData = new FormData();
-                formData.append('create_checkout_session', 'true');
-                
-                fetch('<?php echo $_SERVER['PHP_SELF']; ?>', {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(response => {
-                    addLog('Risposta ricevuta dal server', 'info');
-                    return response.json();
-                })
-                .then(session => {
-                    if (session.error) {
-                        addLog('Errore: ' + session.error, 'error');
-                        checkoutButton.disabled = false;
-                        return;
-                    }
+                // Simula un ritardo di rete
+                setTimeout(() => {
+                    addLog('Connessione al server di pagamento...', 'info');
                     
-                    addLog('Session ID ricevuto: ' + session.id, 'success');
-                    return stripe.redirectToCheckout({ sessionId: session.id });
-                })
-                .then(result => {
-                    if (result && result.error) {
-                        addLog('Errore durante il redirect: ' + result.error.message, 'error');
-                        checkoutButton.disabled = false;
-                    }
-                })
-                .catch(error => {
-                    addLog('Errore durante il checkout: ' + error.message, 'error');
-                    checkoutButton.disabled = false;
-                });
+                    // Simula la creazione della sessione
+                    setTimeout(() => {
+                        addLog('Sessione di pagamento creata', 'success');
+                        
+                        // Simula il reindirizzamento a Stripe
+                        setTimeout(() => {
+                            addLog('Reindirizzamento a Stripe Checkout...', 'info');
+                            
+                            // Simula il completamento
+                            setTimeout(() => {
+                                addLog('Pagamento simulato con successo!', 'success');
+                                alert('SIMULAZIONE: Pagamento completato con successo! In una versione reale, saresti stato reindirizzato a Stripe.');
+                                checkoutButton.disabled = false;
+                            }, 1500);
+                        }, 1000);
+                    }, 1000);
+                }, 1000);
             });
             
-            addLog('Configurazione completata. Pronto per i pagamenti.', 'success');
+            addLog('Configurazione completata. Pronto per la simulazione.', 'success');
         });
         
         // Funzione per aggiungere log alla console di debug
@@ -576,4 +430,3 @@ if (isset($_GET['cancel'])) {
     </script>
 </body>
 </html>
-<?php } ?>
